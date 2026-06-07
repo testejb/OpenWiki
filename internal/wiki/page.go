@@ -47,97 +47,73 @@ type Page struct {
 }
 
 func ListPages(fs FS, root string) ([]PageMeta, error) {
-	indexPath := filepath.Join(root, "wiki", "index.md")
-	data, err := fs.ReadFile(indexPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取 index.md 失败: %w", err)
+	var pages []PageMeta
+
+	for pt, dir := range pageDirs {
+		fullDir := filepath.Join(root, dir)
+		entries, err := fs.ReadDir(fullDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+
+			slug := strings.TrimSuffix(entry.Name(), ".md")
+			pagePath := filepath.Join(fullDir, entry.Name())
+
+			data, err := fs.ReadFile(pagePath)
+			if err != nil {
+				continue
+			}
+
+			meta := extractPageMeta(slug, string(pt), string(data))
+			pages = append(pages, meta)
+		}
 	}
 
-	return parseIndexTable(string(data)), nil
+	return pages, nil
 }
 
-func parseIndexTable(content string) []PageMeta {
-	var pages []PageMeta
-	lines := strings.Split(content, "\n")
-	inTable := false
-	hasTypeColumn := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "| Slug |") {
-			inTable = true
-			// 检测是否有"类型"列
-			hasTypeColumn = strings.Contains(line, "类型")
-			continue
-		}
-		if strings.HasPrefix(line, "|---") {
-			continue
-		}
-		if !inTable {
-			continue
-		}
-		if line == "" || !strings.HasPrefix(line, "|") {
-			inTable = false
-			continue
-		}
+func extractPageMeta(slug, pageType, content string) PageMeta {
+	meta := PageMeta{
+		Slug: slug,
+		Type: pageType,
+	}
 
-		cols := strings.Split(line, "|")
-		minCols := 6
-		if hasTypeColumn {
-			minCols = 7
-		}
-		if len(cols) < minCols {
-			continue
-		}
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		return meta
+	}
 
-		slug := strings.TrimSpace(cols[1])
-		if slug == "" || slug == "Slug" {
-			continue
-		}
+	var fm map[string]interface{}
+	if err := yaml.Unmarshal([]byte(strings.TrimSpace(parts[1])), &fm); err != nil {
+		return meta
+	}
 
-		title := strings.TrimSpace(cols[2])
-		pageType := "page"
-		tagsCol := 3
-		scopeCol := 4
-		updatedCol := 5
-		if hasTypeColumn {
-			pageType = strings.TrimSpace(cols[3])
-			tagsCol = 4
-			scopeCol = 5
-			updatedCol = 6
-		}
-		tagsStr := strings.TrimSpace(cols[tagsCol])
-		scopeStr := strings.TrimSpace(cols[scopeCol])
-		updated := strings.TrimSpace(cols[updatedCol])
-
-		var tags []string
-		for _, t := range strings.Split(tagsStr, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				tags = append(tags, t)
+	if t, ok := fm["title"].(string); ok {
+		meta.Title = t
+	}
+	if t, ok := fm["tags"].([]interface{}); ok {
+		for _, tag := range t {
+			if s, ok := tag.(string); ok {
+				meta.Tags = append(meta.Tags, s)
 			}
 		}
-
-		scopeParts := strings.SplitN(scopeStr, "/", 2)
-		scopeLevel := ""
-		scopeCode := ""
-		if len(scopeParts) >= 1 {
-			scopeLevel = strings.TrimSpace(scopeParts[0])
-		}
-		if len(scopeParts) >= 2 {
-			scopeCode = strings.TrimSpace(scopeParts[1])
-		}
-
-		pages = append(pages, PageMeta{
-			Slug:       slug,
-			Title:      title,
-			Type:       pageType,
-			Tags:       tags,
-			ScopeLevel: scopeLevel,
-			ScopeCode:  scopeCode,
-			Updated:    updated,
-		})
 	}
-	return pages
+	if s, ok := fm["scope_level"].(string); ok {
+		meta.ScopeLevel = s
+	}
+	if s, ok := fm["scope_code"].(string); ok {
+		meta.ScopeCode = s
+	}
+	if s, ok := fm["updated"].(string); ok {
+		meta.Updated = s
+	}
+
+	return meta
 }
 
 func GetPage(fs FS, root, slug string) (*Page, error) {
