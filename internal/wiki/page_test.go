@@ -69,11 +69,21 @@ func TestListPages(t *testing.T) {
 		t.Errorf("expected 2 pages, got %d", len(pages))
 	}
 
-	if pages[0].Slug != "test-page" {
-		t.Errorf("expected first slug=test-page, got %s", pages[0].Slug)
+	pageMap := make(map[string]wiki.PageMeta)
+	for _, p := range pages {
+		pageMap[p.Slug] = p
 	}
-	if pages[0].Title != "测试页面" {
-		t.Errorf("expected title=测试页面, got %s", pages[0].Title)
+
+	if p, ok := pageMap["test-page"]; !ok {
+		t.Error("expected test-page in results")
+	} else if p.Title != "测试页面" {
+		t.Errorf("expected title=测试页面, got %s", p.Title)
+	}
+
+	if p, ok := pageMap["another-page"]; !ok {
+		t.Error("expected another-page in results")
+	} else if p.Title != "另一个页面" {
+		t.Errorf("expected title=另一个页面, got %s", p.Title)
 	}
 }
 
