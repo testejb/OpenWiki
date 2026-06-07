@@ -13,10 +13,20 @@ import (
 
 func setupTestWiki(t *testing.T, dir string) string {
 	t.Helper()
-	wikiRoot := filepath.Join(dir, "test-wiki")
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd failed: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	wikiRoot := "test-wiki"
 
 	var stdout, stderr bytes.Buffer
-	err := cli.RunWithIO([]string{
+	err = cli.RunWithIO([]string{
 		"init", wikiRoot,
 		"--non-interactive", "--json",
 	}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
@@ -24,7 +34,7 @@ func setupTestWiki(t *testing.T, dir string) string {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	tomlPath := filepath.Join(wikiRoot, "openwiki.toml")
+	tomlPath := filepath.Join(dir, "openwiki.toml")
 
 	pageDir := filepath.Join(wikiRoot, "wiki", "pages")
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
@@ -48,20 +58,6 @@ func setupTestWiki(t *testing.T, dir string) string {
 		if err := os.WriteFile(pagePath, []byte(p.content), 0644); err != nil {
 			t.Fatalf("write page %s failed: %v", p.slug, err)
 		}
-	}
-
-	indexContent := `# Wiki 索引
-
-## 资料页
-
-| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |
-|------|------|------|------|----------|----------|
-| page-a | 页面A | page | test, demo | industry/test | 2026-06-01 |
-| page-b | 页面B | page | guide | repo/my-repo | 2026-06-02 |
-`
-	indexPath := filepath.Join(wikiRoot, "wiki", "index.md")
-	if err := os.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
-		t.Fatalf("write index.md failed: %v", err)
 	}
 
 	return tomlPath
