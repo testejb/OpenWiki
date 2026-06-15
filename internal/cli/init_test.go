@@ -34,9 +34,14 @@ func TestInitCreatesDirectoryStructure(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success=true, got error: %v", resp.Error)
 	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
 
 	expectedDirs := []string{
 		"wiki/pages",
+		"wiki/indexes",
 		"raw",
 		"concepts",
 		"entities",
@@ -52,6 +57,8 @@ func TestInitCreatesDirectoryStructure(t *testing.T) {
 		"openwiki.toml",
 		"wiki/index.md",
 		"wiki/log.md",
+		"wiki/indexes/scopes.md",
+		"wiki/indexes/query-usage.jsonl",
 	}
 	for _, f := range expectedFiles {
 		p := filepath.Join(wikiRoot, f)
@@ -67,6 +74,30 @@ func TestInitCreatesDirectoryStructure(t *testing.T) {
 	if !strings.Contains(string(tomlContent), "wiki_root") {
 		t.Error("expected openwiki.toml to contain wiki_root")
 	}
+
+	created, ok := data["created"].([]interface{})
+	if !ok {
+		t.Fatalf("expected created to be a list, got %T", data["created"])
+	}
+	for _, expected := range []string{
+		wikiRoot + "/wiki/indexes/",
+		wikiRoot + "/wiki/indexes/scopes.md",
+		wikiRoot + "/wiki/indexes/query-usage.jsonl",
+		wikiRoot + "/entities/",
+	} {
+		if !containsStringValue(created, expected) {
+			t.Errorf("expected created list to contain %s, got %v", expected, created)
+		}
+	}
+}
+
+func containsStringValue(values []interface{}, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestInitDefaultWikiRoot(t *testing.T) {

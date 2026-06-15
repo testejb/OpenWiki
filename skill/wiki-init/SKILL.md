@@ -26,7 +26,7 @@ If the workflow is reusing an existing `openwiki.toml`:
 
 If the workflow is creating a new wiki instance:
 
-If the user does not provide a `config-dir`, recommend `~/.openwiki` as the default location.
+If the user does not provide a `config-dir`, use project-local `openwiki.toml` in the wiki root created by `openwiki init`.
 
 Ask:
 
@@ -34,10 +34,7 @@ Ask:
 2. **What is the domain/purpose?** (one sentence)
 3. **What are the primary and secondary languages?** (e.g. `zh` / `en`, defaults: `zh` / `en`)
 4. **What types of sources will you add?** (papers, URLs, code files, transcripts, etc.)
-5. **What categories should `index.md` use?**
-   - Research default: `Wiki Pages | Concepts Pages | Topic Relations | Quick Navigation`
-   - Codebase default: `Modules | APIs | Decisions | Flows`
-   - Or specify custom
+5. **Do you need any initial scope hints for the layered indexes?** If none, keep the generated shard indexes empty.
 
 ### 2. Initialize with CLI
 
@@ -62,7 +59,7 @@ If the workflow is reusing an existing `openwiki.toml`, fail fast when:
 
 - the existing contract is missing `wiki_root`
 - `wiki_root` is not absolute
-- the required wiki layout is missing under `wiki_root`, including `wiki/index.md`, `wiki/log.md`, or `wiki/pages/`
+- the required wiki layout is missing under `wiki_root`, including `wiki/index.md`, `wiki/log.md`, `wiki/pages/`, `wiki/indexes/`, or `entities/`
 
 In that failure path:
 
@@ -72,9 +69,9 @@ In that failure path:
 
 ### 4. Write `openwiki.toml`
 
-The `openwiki init` command creates `openwiki.toml` in the wiki root directory. If a separate config directory is needed, copy the generated `openwiki.toml` to the config directory and update `wiki_root` to point to the wiki root.
+The `openwiki init` command creates a project-local `openwiki.toml` in the wiki root directory. If a separate config directory is needed, copy the generated `openwiki.toml` to the config directory and update `wiki_root` to point to the wiki root.
 
-Use the local starter template at `skill/wiki-init/templates/openwiki.toml` as reference.
+Use the local starter template at `skill/wiki-init/templates/openwiki.toml` as reference. The starter config uses a layered index contract, not category-based `index.md` sections.
 
 ### 5. Verify wiki data layout
 
@@ -84,12 +81,22 @@ The CLI creates this structure under `wiki_root`:
 <wiki-root>/
 ├── raw/              ← immutable source documents
 ├── wiki/
-│   ├── index.md      ← content catalog: page, summary, tags, updated
+│   ├── index.md      ← Routing Index: routes lookup to shard indexes
+│   ├── indexes/
+│   │   ├── scopes.md
+│   │   ├── entities.md
+│   │   ├── concepts.md
+│   │   ├── tags.md
+│   │   ├── recent.md
+│   │   ├── hot.md
+│   │   └── query-usage.jsonl
 │   ├── log.md        ← append-only operation log
 │   └── pages/        ← flat topic pages, one slug per file
 ├── entities/         ← entity pages (people, orgs, projects, tools)
 └── concepts/         ← generated reports, analyses, and answers
 ```
+
+`wiki/index.md` is only the Routing Index. Do not use it as a full content catalog. Put lookup entries in the shard indexes under `wiki/indexes/`; keep `query-usage.jsonl` for query usage records.
 
 **Critical:** `wiki/pages/` is flat. All pages live here as `<slug>.md`. No subdirectories. Slugs are lowercase and hyphen-separated.
 
@@ -98,7 +105,7 @@ The CLI creates this structure under `wiki_root`:
 Tell the user:
 
 - If an existing config was reused, say the workflow is connected to the existing wiki.
-- Show the resolved `wiki_root`, plus any available `domain`, `source_types`, `index_categories`, `remote_sync_path`, and `auto_sync` from `openwiki.toml`.
+- Show the resolved `wiki_root`, plus any available `domain`, `source_types`, layered index paths, `remote_sync_path`, and `auto_sync` from `openwiki.toml`.
 - Tell the user they can keep using the same `config-dir` with `wiki-query`, `wiki-ingest`, `wiki-lint`, and `wiki-update`.
 - Configuration initialized at `<config-dir>/openwiki.toml`
 - Wiki data initialized under `<wiki-root>`

@@ -9,7 +9,17 @@ secondary_language = "en"
 types = ["papers", "urls"]
 
 [wiki.index]
-categories = ["<category_1>", "<category_2>", "<category_3>", "<category_4>"]
+layout = "layered"
+routing_index = "wiki/index.md"
+shards = [
+  "wiki/indexes/scopes.md",
+  "wiki/indexes/entities.md",
+  "wiki/indexes/concepts.md",
+  "wiki/indexes/tags.md",
+  "wiki/indexes/recent.md",
+  "wiki/indexes/hot.md",
+]
+query_usage = "wiki/indexes/query-usage.jsonl"
 
 [remote]
 sync_path = "wiki"

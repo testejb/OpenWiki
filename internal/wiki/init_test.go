@@ -61,7 +61,21 @@ func TestInitCreatesLayeredIndexLayout(t *testing.T) {
 	if !strings.Contains(index, "## 检索路由") {
 		t.Fatalf("expected routing index to contain 检索路由, got:\n%s", index)
 	}
+	if !strings.Contains(index, "indexes/scopes.md") {
+		t.Fatalf("expected routing index to mention indexes/scopes.md, got:\n%s", index)
+	}
+	if !strings.Contains(index, "indexes/hot.md") {
+		t.Fatalf("expected routing index to mention indexes/hot.md, got:\n%s", index)
+	}
 	if strings.Contains(index, "| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |") {
 		t.Fatalf("routing index must not use the old full page table template")
+	}
+
+	queryUsageBytes, err := fs.ReadFile(filepath.Join(root, "wiki", "indexes", "query-usage.jsonl"))
+	if err != nil {
+		t.Fatalf("failed to read query-usage.jsonl: %v", err)
+	}
+	if len(queryUsageBytes) != 0 {
+		t.Fatalf("expected query-usage.jsonl to be empty, got %q", string(queryUsageBytes))
 	}
 }
