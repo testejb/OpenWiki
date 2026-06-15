@@ -3,10 +3,22 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 )
 
 var allowedLanguages = []string{"zh", "en"}
+
+var requiredLayoutPaths = []string{
+	"raw",
+	"wiki",
+	filepath.Join("wiki", "pages"),
+	filepath.Join("wiki", "indexes"),
+	filepath.Join("wiki", "index.md"),
+	filepath.Join("wiki", "log.md"),
+	"entities",
+	"concepts",
+}
 
 func Validate(cfg *Config) error {
 	if cfg.WikiRoot == "" {
@@ -22,6 +34,23 @@ func Validate(cfg *Config) error {
 			Code:    "CONFIG_INVALID_PATH",
 			Message: fmt.Sprintf("wiki_root 路径不存在: %s", cfg.WikiRoot),
 			Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot},
+		}
+	}
+
+	for _, rel := range requiredLayoutPaths {
+		if _, err := os.Stat(filepath.Join(cfg.WikiRoot, rel)); err != nil {
+			if os.IsNotExist(err) {
+				return &ValidationError{
+					Code:    "WIKI_LAYOUT_INVALID",
+					Message: fmt.Sprintf("wiki_root 缺少必要路径: %s", rel),
+					Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "missing": rel},
+				}
+			}
+			return &ValidationError{
+				Code:    "WIKI_LAYOUT_INVALID",
+				Message: fmt.Sprintf("wiki_root 无法访问必要路径: %s", rel),
+				Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "missing": rel, "error": err.Error()},
+			}
 		}
 	}
 

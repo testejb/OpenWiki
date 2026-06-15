@@ -153,3 +153,35 @@ func TestStatusVerbose(t *testing.T) {
 		t.Errorf("expected 2 page details, got %d", len(details))
 	}
 }
+
+func TestStatusIncludesIndexHealth(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := setupTestWiki(t, dir)
+
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"--config", tomlPath, "status", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp output.Response
+	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success=true, got error: %v", resp.Error)
+	}
+
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	index, ok := data["index"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data.index to be a map")
+	}
+	health, ok := index["health"].(string)
+	if !ok || health == "" {
+		t.Fatalf("expected data.index.health to be non-empty, got %#v", index["health"])
+	}
+}

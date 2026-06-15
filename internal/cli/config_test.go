@@ -12,6 +12,29 @@ import (
 	"github.com/bytedance/openwiki/internal/output"
 )
 
+func createRequiredWikiLayout(t *testing.T, dir string) {
+	t.Helper()
+	for _, rel := range []string{
+		"raw",
+		"wiki/pages",
+		"wiki/indexes",
+		"entities",
+		"concepts",
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, rel), 0755); err != nil {
+			t.Fatalf("failed to create %s: %v", rel, err)
+		}
+	}
+	for _, rel := range []string{
+		"wiki/index.md",
+		"wiki/log.md",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte("# test\n"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", rel, err)
+		}
+	}
+}
+
 func createConfigTOML(t *testing.T, dir string) string {
 	t.Helper()
 	tomlPath := filepath.Join(dir, "openwiki.toml")
@@ -116,6 +139,7 @@ func TestConfigSet(t *testing.T) {
 
 func TestConfigValidate(t *testing.T) {
 	dir := t.TempDir()
+	createRequiredWikiLayout(t, dir)
 	tomlPath := filepath.Join(dir, "openwiki.toml")
 	content := `wiki_root = "` + dir + `"
 
