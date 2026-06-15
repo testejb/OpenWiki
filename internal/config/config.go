@@ -52,6 +52,16 @@ func Load(path string) (*Config, error) {
 }
 
 func Set(path, key, value string) (oldVal, newVal string, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	var fileCfg Config
+	if err := toml.Unmarshal(data, &fileCfg); err != nil {
+		return "", "", fmt.Errorf("解析 TOML 配置失败: %w", err)
+	}
+
 	cfg, err := Load(path)
 	if err != nil {
 		return "", "", err
@@ -64,6 +74,9 @@ func Set(path, key, value string) (oldVal, newVal string, err error) {
 
 	if err := setFieldValue(cfg, key, value); err != nil {
 		return "", "", err
+	}
+	if key != "wiki_root" {
+		cfg.WikiRoot = fileCfg.WikiRoot
 	}
 
 	f, err := os.Create(path)

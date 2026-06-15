@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/openwiki/internal/config"
@@ -126,6 +127,37 @@ secondary_language = "en"
 	}
 	if cfg.Wiki.PrimaryLanguage != "en" {
 		t.Errorf("expected primary_language=en after set, got %s", cfg.Wiki.PrimaryLanguage)
+	}
+}
+
+func TestSetNestedFieldPreservesRelativeWikiRoot(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	_, _, err := config.Set(tomlPath, "wiki.primary_language", "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("failed to read test toml: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, `wiki_root = "./openwiki"`) {
+		t.Errorf("expected file to preserve relative wiki_root, got:\n%s", output)
+	}
+	if !strings.Contains(output, `primary_language = "en"`) {
+		t.Errorf("expected file to update primary_language, got:\n%s", output)
 	}
 }
 
