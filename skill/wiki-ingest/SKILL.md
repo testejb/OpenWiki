@@ -4,32 +4,34 @@ description: Use when adding a new source to a wiki — a paper, article, URL, f
 ---
 # Wiki Ingest
 
-Add a source to the wiki. Read it, discuss with the user, write or update wiki pages, update the index, and log the operation.
+Add a source to the wiki. Read it, discuss with the user, write or update Markdown pages directly, update shard indexes, and log the operation.
+
+## Runtime Contract
+
+- Use `openwiki.toml` as the runtime contract.
+- Do not infer paths from `cwd`, legacy agent-specific files, or compatibility directories.
+- `wiki/index.md` is the lightweight Routing Index.
+- `wiki/indexes/` contains Shard Indexes.
+- AI writes Markdown files directly using templates. Do not require `openwiki page create` for content writes.
 
 ## Pre-condition
 
-Use this discovery order for the configuration directory:
+Discover and read `openwiki.toml`:
 
-1. If the user explicitly provides a `config-dir`, use it.
-2. Otherwise, check `~/.openwiki/openwiki.toml`. If it exists and is valid, use it as the default wiki config.
-3. If the default config is not found or invalid, search upward from the current working directory for `openwiki.toml`.
-4. If `openwiki.toml` is still not found, ask the user for an absolute config-dir or tell them to run `wiki-init` first.
+1. If the user explicitly provides a config path or project directory, use that `openwiki.toml`.
+2. Otherwise, search upward from the current working directory for `openwiki.toml`.
+3. If not found, ask the user for the project path or tell them to run `wiki-init` first.
 
-If the default wiki config at `~/.openwiki` is used, tell the user you are using the default wiki config.
+Resolve `wiki_root` from `openwiki.toml`, then locate:
 
-Read `openwiki.toml` to resolve:
-
-- the absolute `wiki_root`
 - `raw/`
 - `wiki/index.md`
 - `wiki/log.md`
 - `wiki/pages/`
+- `wiki/indexes/`
 - `entities/`
 - `concepts/`
-- `remote_sync_path`
-- `auto_sync`
-
-Do not infer these paths from `cwd`, legacy agent-specific files, or compatibility directories.
+- optional `remote_sync_path` and `auto_sync`
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
@@ -39,10 +41,11 @@ Do not infer these paths from `cwd`, legacy agent-specific files, or compatibili
 
 The source can be:
 
-- **File path** — read it directly from `raw/` or another user-provided local path
-- **URL** — use the `agent-browser` skill to fetch it; snapshot to `raw/` if needed
-- **Pasted text** — use what the user provided
-- **当前会话上下文** — discussion history so far
+- **File path** — read it directly from `raw/` or another user-provided local path.
+- **URL** — use the `agent-browser` skill to fetch it; snapshot to `raw/` if needed.
+- **Pasted text** — use what the user provided.
+- **当前会话上下文** — discussion history so far.
+
 ### 2. Read the source in full
 
 Read all content. For long sources, read in sections. Do not skip.
@@ -51,123 +54,104 @@ Read all content. For long sources, read in sections. Do not skip.
 
 Tell the user:
 
-- 3-5 bullet points of key takeaways
-- what entities or concepts this introduces or updates
-- whether it contradicts anything already in the wiki (read `wiki/index.md` and relevant pages to check)
-
-**建议适用范围**：分析源内容，建议 `scope_level` 和 `scope_code`。枚举定义详见 `references/page-template.md`。
-
-展示格式：`适用范围: <scope_level 中文名>（<scope_code>）`。
+- 3-5 bullet points of key takeaways.
+- what entities or concepts this introduces or updates.
+- whether it contradicts anything already in the wiki. Read `wiki/index.md`, 1-3 relevant shard indexes, and relevant pages to check.
+- suggested `scope_level` and `scope_code` when the page template requires them.
 
 Ask: **"Anything specific you want me to emphasize or de-emphasize? 适用范围是否合适？"**
 
 Wait for the user's response before proceeding.
 
-### 4. Network supplement (recommended)
+### 4. Network supplement when useful
 
-For core concepts or key claims, use `agent-browser` to fetch current authoritative sources. Prioritize by category:
+For core concepts or key claims, use `agent-browser` to fetch current authoritative sources. Prioritize official or authoritative sites for the topic.
 
-- **General concepts**: en.wikipedia.org / zh.wikipedia.org
-- **Tech/Programming**: docs.python.org, developer.mozilla.org, arxiv.org, github.com
-- **AI/ML Papers**: arxiv.org, paperswithcode.com, huggingface.co
-- **News/Current Events**: reuters.com, bbc.com, theguardian.com
-- **Academic**: scholar.google.com, semanticscholar.org
-- **Official docs**: prefer the official site for the topic
+### 5. Generate slugs
 
-### 5. Generate the slug
+Use lowercase, hyphen-separated slugs with no special characters. For Chinese titles, translate the title meaning to English and slugify it; do not use pinyin by default.
 
-详见 `references/slug-rules.md`。核心规则：全小写、连字符、无特殊字符。中文源标题翻译为英文后 slugify，不使用拼音。
+### 6. Write or update wiki pages directly
 
-### 6. Write or update wiki pages
+Write Markdown files directly using the project templates and existing page style:
 
-Use the CLI to create pages:
+- Summary pages: `wiki/pages/<slug>.md`
+- Entity pages: `entities/<slug>.md`
+- Concept pages: `concepts/<slug>.md`
 
-```bash
-openwiki page create <slug> --file <content-file> --json
-```
+Required frontmatter should include the fields used by the repository templates, including title, tags, updated date, and scope fields when applicable.
 
-页面模板详见 `references/page-template.md`。
+After writing, read the files back and check:
 
-### 6.1 验证写入
-
-Use the CLI to read back the page:
-
-```bash
-openwiki page get <slug> --json
-```
-
-执行以下检查：
-
-- frontmatter 是否包含所有必填字段（title、tags、updated、scope_level、scope_code）
-- [[交叉引用]] 是否指向存在的页面（在 `wiki/pages/` 中可找到对应文件）
-- 若验证失败，报告具体错误并建议修复方案
+- frontmatter contains all required fields.
+- `[[slug]]` cross-references point to existing or newly created pages.
+- summary, tags, type, scope, and updated date match the intended page metadata.
 
 ### 7. Update related entity or concept pages
 
 For each entity or concept touched by this source:
 
-- **Page exists:** read it, update the relevant section, update `updated`
-- **Page does not exist:** create it with the same frontmatter format
-- **Entity pages** go to `entities/` directory (use `--type entity`)
-- **Concept pages** go to `concepts/` directory (use `--type concept`)
-- **Summary pages** go to `wiki/pages/` directory (default)
-
-使用 CLI 创建不同类型的页面：
-
-```bash
-# 实体页面
-openwiki page create <slug> --file <content-file> --type entity --json
-
-# 概念页面
-openwiki page create <slug> --file <content-file> --type concept --json
-
-# 资料页面（默认）
-openwiki page create <slug> --file <content-file> --json
-```
+- **Page exists:** read it, update the relevant section, update `updated`.
+- **Page does not exist:** create it with the same frontmatter format.
+- Keep source-backed claims cited or traceable to the ingested source.
 
 ### 8. Backlink audit
 
-Scan all existing pages in `wiki/pages/` for any that mention this source's entities or concepts but do not yet link to the new page. Add `[[new-slug]]` references where appropriate.
+Scan existing pages in `wiki/pages/`, `entities/`, and `concepts/` for mentions of the new source's entities or concepts. Add `[[new-slug]]` references where appropriate and confirmed.
 
-### 9. Update `wiki/index.md`
+## Layered Index Write Protocol
 
-Add or update entries in the table format:
+After writing or updating a page, update the relevant shard indexes:
 
-```markdown
-## Wiki 页面
-| 页面 | 摘要 | 标签 | 最后更新 |
-|------|------|------|----------|
-| [[<slug>]] | One-line description | tag1, tag2 | <today> |
-```
+- Summary page in `wiki/pages/` → update `wiki/indexes/scopes.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
+- Entity page in `entities/` → update `wiki/indexes/entities.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
+- Concept page in `concepts/` → update `wiki/indexes/concepts.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
 
-同步更新 category_3（适用范围）区域。按 `scope_code` 分组聚合，每组以 `### scope_code` 三级标题开头，组内按最后更新日期倒序排列：
+Guidelines:
 
-```markdown
-## 适用范围
+- Use the page title, one-line summary, tags, scope, type, path, and updated date in shard entries.
+- Remove duplicate stale entries for the same slug before adding the new entry.
+- Keep `wiki/indexes/recent.md` ordered by latest update where practical.
+- Do not append all page rows to `wiki/index.md`. `wiki/index.md` is a Routing Index and must stay lightweight.
+- Do not use any category-based top-level index sections as the source of truth.
 
-### <scope_code>
-- [[<slug>]] — <scope_level 中文名> | <today>
-```
-
-- scope_code 组已存在时追加 `[[slug]]` 条目到该组
-- scope_code 组不存在时创建新的 `### scope_code` 区块
-- scope_code 组下最后一个页面被移除时删除该区块
-
-### 10. Append to `wiki/log.md`
-
-Use the CLI:
+If shard updates fail or are uncertain, warn the user that the page may not be discoverable and recommend:
 
 ```bash
-openwiki log append "ingest | <source title> - Created/Updated pages: xxx, yyy"
+openwiki index rebuild
+```
+
+### 9. Append to `wiki/log.md`
+
+Append a concise operation record directly to `wiki/log.md` or with the log helper if available:
+
+```text
+ingest | <source title> - Created/Updated pages: xxx, yyy
+```
+
+### 10. Verify
+
+After writing files, verify:
+
+```bash
+openwiki index check
+openwiki status
+```
+
+If verification reports index drift, recommend or run:
+
+```bash
+openwiki index rebuild
 ```
 
 ### 11. Report to the user
 
-- Summary page: `wiki/pages/<slug>.md`
+- Summary pages created or updated: <list>
 - Entity or concept pages created or updated: <list>
 - Pages that received backlinks: <list>
-- Index updated
+- Shard indexes updated under `wiki/indexes/`
+- Any verification warnings and suggested next steps
 
 ### 12. Cloud Sync
 
-详见 `references/cloud-sync.md`。使用 `pcloud` 将 `wiki_root` 同步到远程对象存储。同步失败不阻塞 ingest。
+If `remote_sync_path` and `auto_sync` are configured in `openwiki.toml`, sync `wiki_root` to the remote location using the configured workflow. Sync failure does not block ingest; report it separately.

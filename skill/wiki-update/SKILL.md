@@ -7,22 +7,29 @@ composes: [wiki-ingest, wiki-lint, wiki-init]
 
 Revise existing wiki pages. Always show diffs before writing. Always log. Always cite the source of new information.
 
+## Runtime Contract
+
+- Use `openwiki.toml` as the runtime contract.
+- `wiki/index.md` is the lightweight Routing Index.
+- `wiki/indexes/` contains Shard Indexes.
+- AI edits Markdown files directly. Do not require CLI page update commands for content writes.
+
 ## Pre-condition
 
-Use this discovery order for the configuration directory:
+Discover and read `openwiki.toml`:
 
-1. If the user explicitly provides a `config-dir`, use it.
-2. Otherwise, check `~/.openwiki/openwiki.toml`. If it exists and is valid, use it as the default wiki config.
-3. If the default config is not found or invalid, search upward from the current working directory for `openwiki.toml`.
-4. If `openwiki.toml` is still not found, ask the user for an absolute config-dir or tell them to run `wiki-init` first.
+1. If the user explicitly provides a config path or project directory, use that `openwiki.toml`.
+2. Otherwise, search upward from the current working directory for `openwiki.toml`.
+3. If not found, ask the user for the project path or tell them to run `wiki-init` first.
 
-If the default wiki config at `~/.openwiki` is used, tell the user you are using the default wiki config.
-
-Read `openwiki.toml` to resolve the absolute `wiki_root` plus:
+Resolve `wiki_root` from `openwiki.toml`, then locate:
 
 - `wiki/index.md`
 - `wiki/log.md`
 - `wiki/pages/`
+- `wiki/indexes/`
+- `entities/`
+- `concepts/`
 
 Do not depend on legacy agent-specific files or compatibility directories.
 
@@ -32,62 +39,80 @@ Do not depend on legacy agent-specific files or compatibility directories.
 
 The user may provide:
 
-- specific page names
-- new information
-- a lint report
+- specific page names.
+- new information.
+- a lint report.
+- a requested metadata change such as title, summary, tags, scope, type, or updated date.
 
-### 2. For each page to update
+### 2. Read current content
 
-Use the CLI to read the current content:
+Read the target Markdown files directly from `wiki/pages/`, `entities/`, or `concepts/`. Use `wiki/index.md` and relevant shard indexes under `wiki/indexes/` to locate candidates when the slug is unclear.
 
-```bash
-openwiki page get <slug> --json
-```
-
-Propose the change with:
+For each proposed change, show:
 
 > **Current:** `<quote the existing text>`  
 > **Proposed:** `<replacement text>`  
 > **Reason:** `<why this change is warranted>`  
 > **Source:** `<URL, raw/ path, or other source>`
 
-Ask for confirmation before writing each page.
+Ask for confirmation before writing each page unless the user has explicitly authorized the full batch.
 
-Use the CLI to update:
+### 3. Write Markdown files directly
+
+Edit the page files directly. Preserve frontmatter structure, citations, cross-references, and local style. Update `updated` whenever content or important metadata changes.
+
+### 4. Check downstream effects
+
+After identifying the primary pages to update, search for `[[slug]]` references across `wiki/pages/`, `entities/`, and `concepts/`. Flag linked pages that may also need updating.
+
+### 5. Contradiction sweep
+
+If the new information contradicts existing wiki content, search all pages for the contradicted claim and update all affected occurrences after confirmation.
+
+## Layered Index Update Protocol
+
+When changing page title, summary, tags, scope, type, or updated date:
+
+1. Remove stale entries from old shard indexes.
+2. Add updated entries to new shard indexes.
+3. Update `wiki/indexes/recent.md`.
+4. Keep `wiki/index.md` lightweight; do not add full page rows to it.
+5. Append `wiki/log.md`.
+6. If unsure whether all shard indexes were updated correctly, run or recommend:
 
 ```bash
-openwiki page update <slug> --file <content-file> --json
+openwiki index check
+openwiki index rebuild
 ```
 
-### 3. Check downstream effects
+Shard placement:
 
-After identifying the primary pages to update, search for `[[slug]]` references across all of `wiki/pages/`. Flag any linked pages that may also need updating.
-
-### 4. Contradiction sweep
-
-If the new information contradicts existing wiki content, search all pages for the contradicted claim and update all affected occurrences.
-
-### 5. Update `wiki/index.md`
-
-If a page summary changes, update its row and update the `updated` date in frontmatter.
-
-如果页面的 `scope_level` 或 `scope_code` 发生变更，同步更新 category_3（适用范围）区域：
-- category_3 中旧 scope_code 组移除该页面的 `[[slug]]`
-- category_3 中新 scope_code 组新增该页面的 `[[slug]]`
-- 若旧组变为空则删除该 `### scope_code` 区块
-- 若新组不存在则创建 `### scope_code` 区块
+- Summary pages in `wiki/pages/` belong in `wiki/indexes/scopes.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
+- Entity pages in `entities/` belong in `wiki/indexes/entities.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
+- Concept pages in `concepts/` belong in `wiki/indexes/concepts.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
 
 ### 6. Append to `wiki/log.md`
 
-Use the CLI:
+Append a concise update record:
+
+```text
+update | <slug> - <reason>
+```
+
+### 7. Verify
+
+Run or recommend:
 
 ```bash
-openwiki log append "update | <slug> - <reason>"
+openwiki index check
+openwiki status
 ```
 
 ## Common Mistakes
 
-- updating without a source
-- skipping downstream checks
-- skipping the log
-- batch-writing without per-page confirmation
+- updating without a source.
+- skipping downstream checks.
+- skipping `wiki/log.md`.
+- batch-writing without clear authorization.
+- updating page metadata but leaving stale shard index entries under `wiki/indexes/`.
+- adding full page catalogs to `wiki/index.md` instead of keeping it as the Routing Index.
