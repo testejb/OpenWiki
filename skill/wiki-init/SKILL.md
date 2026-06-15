@@ -21,7 +21,7 @@ Check whether an `openwiki.toml` already exists in the target configuration dire
 If the workflow is reusing an existing `openwiki.toml`:
 
 - Read the existing contract first.
-- skip asking for `wiki_root`, `domain`, `source_types`, `index_categories`, `remote_sync_path`, `auto_sync`, `primary_language`, and `secondary_language` when they are already present in `openwiki.toml`.
+- skip asking for `wiki_root`, `domain`, `source_types`, layered index settings, `remote_sync_path`, `auto_sync`, `primary_language`, and `secondary_language` when they are already present in `openwiki.toml`.
 - only ask for fields that are still missing from the existing contract.
 
 If the workflow is creating a new wiki instance:
