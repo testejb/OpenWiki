@@ -211,8 +211,8 @@ func CreatePage(fs FS, root string, page *Page, pageType ...PageType) error {
 		return fmt.Errorf("写入页面失败: %w", err)
 	}
 
-	if err := addToIndex(fs, root, page, pt); err != nil {
-		return fmt.Errorf("更新 index.md 失败: %w", err)
+	if _, err := RebuildIndex(fs, root); err != nil {
+		return fmt.Errorf("重建索引失败: %w", err)
 	}
 
 	return nil
@@ -358,8 +358,8 @@ func UpdatePage(fs FS, root string, page *Page, newType ...PageType) error {
 		}
 	}
 
-	if err := updateIndexRow(fs, root, page); err != nil {
-		return fmt.Errorf("更新 index.md 失败: %w", err)
+	if _, err := RebuildIndex(fs, root); err != nil {
+		return fmt.Errorf("重建索引失败: %w", err)
 	}
 
 	return nil
@@ -375,8 +375,8 @@ func DeletePage(fs FS, root, slug string) error {
 		return fmt.Errorf("删除页面文件失败: %w", err)
 	}
 
-	if err := removeFromIndex(fs, root, slug); err != nil {
-		return fmt.Errorf("更新 index.md 失败: %w", err)
+	if _, err := RebuildIndex(fs, root); err != nil {
+		return fmt.Errorf("重建索引失败: %w", err)
 	}
 
 	return nil

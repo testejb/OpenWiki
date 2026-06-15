@@ -211,6 +211,79 @@ func TestCreatePage(t *testing.T) {
 	}
 }
 
+func TestPageCRUDMaintainsRoutingIndexAndShardIndexes(t *testing.T) {
+	fs := wiki.NewMemFS()
+	root := "/routing-wiki"
+	if err := wiki.Init(fs, root, map[string]interface{}{"wiki_root": root}); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	page := &wiki.Page{
+		Slug: "new-page",
+		Frontmatter: map[string]interface{}{
+			"title":       "新页面",
+			"tags":        []string{"new", "routing"},
+			"scope_level": "repo",
+			"scope_code":  "openwiki",
+			"updated":     "2026-06-15",
+		},
+		Body: "# 新页面\n\n这是新页面的内容。",
+	}
+
+	if err := wiki.CreatePage(fs, root, page); err != nil {
+		t.Fatalf("CreatePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 1)
+
+	page.Frontmatter["title"] = "更新后的新页面"
+	page.Frontmatter["updated"] = "2026-06-16"
+	page.Body = "# 更新后的新页面\n\n内容已更新。"
+	if err := wiki.UpdatePage(fs, root, page); err != nil {
+		t.Fatalf("UpdatePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 1)
+
+	if err := wiki.DeletePage(fs, root, "new-page"); err != nil {
+		t.Fatalf("DeletePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 0)
+}
+
+func assertRoutingIndexHasNoPageRow(t *testing.T, fs wiki.FS, root, slug string) {
+	t.Helper()
+	data, err := fs.ReadFile(filepath.Join(root, "wiki", "index.md"))
+	if err != nil {
+		t.Fatalf("read routing index failed: %v", err)
+	}
+	index := string(data)
+	if !strings.Contains(index, "## 检索路由") {
+		t.Fatalf("expected routing index to keep 检索路由, got:\n%s", index)
+	}
+	if strings.Contains(index, "| "+slug+" |") {
+		t.Fatalf("routing index should not contain old-style page row for %s, got:\n%s", slug, index)
+	}
+}
+
+func assertIndexOK(t *testing.T, fs wiki.FS, root string, wantPageCount int) {
+	t.Helper()
+	result, err := wiki.CheckIndex(fs, root)
+	if err != nil {
+		t.Fatalf("CheckIndex returned error: %v", err)
+	}
+	if result.PageCount != wantPageCount {
+		t.Fatalf("expected page count %d, got %#v", wantPageCount, result)
+	}
+	if result.Health != "ok" {
+		t.Fatalf("expected index health ok, got %#v", result)
+	}
+	if len(result.MissingFiles) > 0 || len(result.UnindexedPages) > 0 {
+		t.Fatalf("expected no index warnings, got %#v", result)
+	}
+}
+
 func TestCreatePageAlreadyExists(t *testing.T) {
 	fs, root := setupTestWiki(t)
 
