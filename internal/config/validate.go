@@ -9,15 +9,18 @@ import (
 
 var allowedLanguages = []string{"zh", "en"}
 
-var requiredLayoutPaths = []string{
+var requiredLayoutDirs = []string{
 	"raw",
 	"wiki",
 	filepath.Join("wiki", "pages"),
 	filepath.Join("wiki", "indexes"),
-	filepath.Join("wiki", "index.md"),
-	filepath.Join("wiki", "log.md"),
 	"entities",
 	"concepts",
+}
+
+var requiredLayoutFiles = []string{
+	filepath.Join("wiki", "index.md"),
+	filepath.Join("wiki", "log.md"),
 }
 
 func Validate(cfg *Config) error {
@@ -34,23 +37,6 @@ func Validate(cfg *Config) error {
 			Code:    "CONFIG_INVALID_PATH",
 			Message: fmt.Sprintf("wiki_root 路径不存在: %s", cfg.WikiRoot),
 			Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot},
-		}
-	}
-
-	for _, rel := range requiredLayoutPaths {
-		if _, err := os.Stat(filepath.Join(cfg.WikiRoot, rel)); err != nil {
-			if os.IsNotExist(err) {
-				return &ValidationError{
-					Code:    "WIKI_LAYOUT_INVALID",
-					Message: fmt.Sprintf("wiki_root 缺少必要路径: %s", rel),
-					Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "missing": rel},
-				}
-			}
-			return &ValidationError{
-				Code:    "WIKI_LAYOUT_INVALID",
-				Message: fmt.Sprintf("wiki_root 无法访问必要路径: %s", rel),
-				Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "missing": rel, "error": err.Error()},
-			}
 		}
 	}
 
@@ -78,7 +64,50 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	for _, rel := range requiredLayoutDirs {
+		info, err := os.Stat(filepath.Join(cfg.WikiRoot, rel))
+		if err != nil {
+			return layoutValidationError(cfg.WikiRoot, rel, err)
+		}
+		if !info.IsDir() {
+			return &ValidationError{
+				Code:    "WIKI_LAYOUT_INVALID",
+				Message: fmt.Sprintf("wiki_root 必要路径不是目录: %s", rel),
+				Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "invalid": rel, "expected": "directory"},
+			}
+		}
+	}
+
+	for _, rel := range requiredLayoutFiles {
+		info, err := os.Stat(filepath.Join(cfg.WikiRoot, rel))
+		if err != nil {
+			return layoutValidationError(cfg.WikiRoot, rel, err)
+		}
+		if info.IsDir() {
+			return &ValidationError{
+				Code:    "WIKI_LAYOUT_INVALID",
+				Message: fmt.Sprintf("wiki_root 必要路径不是文件: %s", rel),
+				Details: map[string]interface{}{"field": "wiki_root", "path": cfg.WikiRoot, "invalid": rel, "expected": "file"},
+			}
+		}
+	}
+
 	return nil
+}
+
+func layoutValidationError(root, rel string, err error) error {
+	if os.IsNotExist(err) {
+		return &ValidationError{
+			Code:    "WIKI_LAYOUT_INVALID",
+			Message: fmt.Sprintf("wiki_root 缺少必要路径: %s", rel),
+			Details: map[string]interface{}{"field": "wiki_root", "path": root, "missing": rel},
+		}
+	}
+	return &ValidationError{
+		Code:    "WIKI_LAYOUT_INVALID",
+		Message: fmt.Sprintf("wiki_root 无法访问必要路径: %s", rel),
+		Details: map[string]interface{}{"field": "wiki_root", "path": root, "missing": rel, "error": err.Error()},
+	}
 }
 
 type ValidationError struct {

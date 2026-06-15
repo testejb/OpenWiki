@@ -181,7 +181,17 @@ func TestStatusIncludesIndexHealth(t *testing.T) {
 		t.Fatal("expected data.index to be a map")
 	}
 	health, ok := index["health"].(string)
-	if !ok || health == "" {
-		t.Fatalf("expected data.index.health to be non-empty, got %#v", index["health"])
+	if !ok {
+		t.Fatalf("expected data.index.health to be a string, got %#v", index["health"])
+	}
+	if health != "warning" {
+		t.Fatalf("expected data.index.health=warning, got %q", health)
+	}
+	unindexedPages, ok := index["unindexed_pages"].([]interface{})
+	if !ok {
+		t.Fatalf("expected data.index.unindexed_pages to be an array, got %#v", index["unindexed_pages"])
+	}
+	if len(unindexedPages) == 0 {
+		t.Fatal("expected data.index.unindexed_pages to be non-empty")
 	}
 }

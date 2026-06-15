@@ -32,6 +32,7 @@ type IndexStatus struct {
 	Health         string   `json:"health"`
 	MissingFiles   []string `json:"missing_files,omitempty"`
 	UnindexedPages []string `json:"unindexed_pages,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 type PageDetail struct {
@@ -73,9 +74,7 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 		ByScope: make(map[string]int),
 	}
 
-	allSlugs := make(map[string]bool)
 	for _, p := range pages {
-		allSlugs[p.Slug] = true
 		scopeKey := p.ScopeLevel
 		if p.ScopeCode != "" {
 			scopeKey = p.ScopeLevel + "/" + p.ScopeCode
@@ -114,6 +113,8 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 			MissingFiles:   check.MissingFiles,
 			UnindexedPages: check.UnindexedPages,
 		}
+	} else {
+		indexStatus.Error = err.Error()
 	}
 
 	statusResult := StatusResult{
@@ -133,6 +134,9 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 	fmt.Fprintf(stdout, "配置来源: %s (%s)\n", result.Source, result.Path)
 	fmt.Fprintf(stdout, "页面总数: %d\n", stats.Total)
 	fmt.Fprintf(stdout, "索引健康状态: %s\n", indexStatus.Health)
+	if indexStatus.Error != "" {
+		fmt.Fprintf(stdout, "索引检查错误: %s\n", indexStatus.Error)
+	}
 	if len(indexStatus.MissingFiles) > 0 {
 		fmt.Fprintf(stdout, "缺失索引文件: %v\n", indexStatus.MissingFiles)
 	}
