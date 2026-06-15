@@ -82,6 +82,8 @@ func RunWithIO(args []string, version, buildTime string, stdout, stderr io.Write
 		return runStatus(stdout, stderr, &opts, subArgs)
 	case "page":
 		return runPage(stdout, stderr, &opts, subArgs)
+	case "index":
+		return runIndex(stdout, stderr, &opts, subArgs)
 	case "log":
 		return runLog(stdout, stderr, &opts, subArgs)
 	case "sync":
@@ -112,6 +114,7 @@ func printHelp(w io.Writer) {
   config   管理配置
   status   查看 wiki 状态
   page     管理 wiki 页面
+  index    检查和重建分层索引
   log      查看操作日志
   sync     同步到云端
 
