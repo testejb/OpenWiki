@@ -127,6 +127,26 @@ func (h *Harness) TempWikiRoot() string {
 	return h.WikiRoot
 }
 
+func AssertLayeredIndexLayout(t testing.TB, wikiRoot string) {
+	t.Helper()
+
+	expected := []string{
+		filepath.Join(wikiRoot, "wiki", "index.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "scopes.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "entities.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "concepts.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "tags.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "recent.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "hot.md"),
+		filepath.Join(wikiRoot, "wiki", "indexes", "query-usage.jsonl"),
+	}
+	for _, path := range expected {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected layered index path %s: %v", path, err)
+		}
+	}
+}
+
 func (h *Harness) Cleanup() {
 	os.RemoveAll(h.workDir)
 }

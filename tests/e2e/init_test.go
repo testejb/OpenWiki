@@ -44,6 +44,62 @@ func TestE2EInit(t *testing.T) {
 	}
 }
 
+func TestInitCreatesLayeredIndexAndIndexCommandsPass(t *testing.T) {
+	h := harness.New(t)
+
+	wikiRoot := h.TempWikiRoot()
+
+	initResult, err := h.Run("init", wikiRoot, "--non-interactive", "--json")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if initResult.ExitCode != 0 {
+		t.Fatalf("init failed: stdout=%s stderr=%s", initResult.Stdout, initResult.Stderr)
+	}
+
+	var initData map[string]interface{}
+	if err := json.Unmarshal([]byte(initResult.Stdout), &initData); err != nil {
+		t.Fatalf("parse init JSON: %v\nstdout: %s", err, initResult.Stdout)
+	}
+	if initData["success"] != true {
+		t.Fatalf("init failed: %v", initData)
+	}
+
+	harness.AssertLayeredIndexLayout(t, wikiRoot)
+
+	configPath := filepath.Join(wikiRoot, "openwiki.toml")
+
+	checkResult, err := h.Run("--config", configPath, "index", "check", "--json")
+	if err != nil {
+		t.Fatalf("index check: %v", err)
+	}
+	if checkResult.ExitCode != 0 {
+		t.Fatalf("index check failed: stdout=%s stderr=%s", checkResult.Stdout, checkResult.Stderr)
+	}
+	var checkData map[string]interface{}
+	if err := json.Unmarshal([]byte(checkResult.Stdout), &checkData); err != nil {
+		t.Fatalf("parse index check JSON: %v\nstdout: %s", err, checkResult.Stdout)
+	}
+	if checkData["success"] != true {
+		t.Fatalf("expected index check success=true, got %v", checkData)
+	}
+
+	rebuildResult, err := h.Run("--config", configPath, "index", "rebuild", "--json")
+	if err != nil {
+		t.Fatalf("index rebuild: %v", err)
+	}
+	if rebuildResult.ExitCode != 0 {
+		t.Fatalf("index rebuild failed: stdout=%s stderr=%s", rebuildResult.Stdout, rebuildResult.Stderr)
+	}
+	var rebuildData map[string]interface{}
+	if err := json.Unmarshal([]byte(rebuildResult.Stdout), &rebuildData); err != nil {
+		t.Fatalf("parse index rebuild JSON: %v\nstdout: %s", err, rebuildResult.Stdout)
+	}
+	if rebuildData["success"] != true {
+		t.Fatalf("expected index rebuild success=true, got %v", rebuildData)
+	}
+}
+
 func TestE2EPageLifecycle(t *testing.T) {
 	h := harness.New(t)
 
