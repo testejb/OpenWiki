@@ -56,6 +56,25 @@ auto_sync = false
 	}
 }
 
+func TestLoadResolvesRelativeWikiRootFromConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	cfg, err := config.Load(tomlPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := filepath.Join(dir, "openwiki")
+	if cfg.WikiRoot != expected {
+		t.Errorf("expected wiki_root=%s, got %s", expected, cfg.WikiRoot)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := config.Load("/nonexistent/path/openwiki.toml")
 	if err == nil {

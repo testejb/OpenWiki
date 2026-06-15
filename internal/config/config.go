@@ -3,14 +3,15 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
-	WikiRoot string        `toml:"wiki_root"`
-	Wiki     WikiConfig    `toml:"wiki"`
-	Remote   RemoteConfig  `toml:"remote"`
+	WikiRoot string       `toml:"wiki_root"`
+	Wiki     WikiConfig   `toml:"wiki"`
+	Remote   RemoteConfig `toml:"remote"`
 }
 
 type WikiConfig struct {
@@ -42,6 +43,9 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("解析 TOML 配置失败: %w", err)
+	}
+	if cfg.WikiRoot != "" && !filepath.IsAbs(cfg.WikiRoot) {
+		cfg.WikiRoot = filepath.Clean(filepath.Join(filepath.Dir(path), cfg.WikiRoot))
 	}
 
 	return &cfg, nil
