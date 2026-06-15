@@ -14,11 +14,18 @@ func runIndex(stdout, stderr io.Writer, opts *GlobalOptions, args []string) erro
 	}
 
 	subcommand := args[0]
+	subArgs := args[1:]
 
 	switch subcommand {
 	case "check":
+		if len(subArgs) > 0 {
+			return fmt.Errorf("index check 不接受额外参数: %v", subArgs)
+		}
 		return runIndexCheck(stdout, stderr, opts)
 	case "rebuild":
+		if len(subArgs) > 0 {
+			return fmt.Errorf("index rebuild 不接受额外参数: %v", subArgs)
+		}
 		return runIndexRebuild(stdout, stderr, opts)
 	default:
 		return fmt.Errorf("未知 index 子命令: %s", subcommand)
@@ -94,8 +101,11 @@ func runIndexRebuild(stdout, stderr io.Writer, opts *GlobalOptions) error {
 	for _, file := range result.RebuiltFiles {
 		fmt.Fprintf(stdout, "  %s\n", file)
 	}
-	if result.BackupPath != "" {
-		fmt.Fprintf(stdout, "旧 index 备份: %s\n", result.BackupPath)
+	if len(result.BackupPaths) > 0 {
+		fmt.Fprintf(stdout, "旧索引备份:\n")
+		for _, path := range result.BackupPaths {
+			fmt.Fprintf(stdout, "  %s\n", path)
+		}
 	}
 	return nil
 }

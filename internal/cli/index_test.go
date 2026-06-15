@@ -14,7 +14,6 @@ import (
 func TestIndexCheckJSON(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := setupTestWiki(t, dir)
-	writeIndexTestConfig(t, tomlPath)
 
 	var stdout, stderr bytes.Buffer
 	err := cli.RunWithIO([]string{"--config", tomlPath, "index", "check", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
@@ -34,7 +33,6 @@ func TestIndexCheckJSON(t *testing.T) {
 func TestIndexRebuildJSON(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := setupTestWiki(t, dir)
-	writeIndexTestConfig(t, tomlPath)
 	wikiRoot := filepath.Join(dir, "test-wiki")
 
 	content := `---
@@ -76,16 +74,13 @@ updated: 2026-06-15
 	}
 }
 
-func writeIndexTestConfig(t *testing.T, tomlPath string) {
-	t.Helper()
+func TestIndexCheckRejectsExtraArgs(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := setupTestWiki(t, dir)
 
-	content := `wiki_root = "./test-wiki"
-
-[wiki]
-primary_language = "zh"
-secondary_language = "en"
-`
-	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
-		t.Fatalf("write index test config failed: %v", err)
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"--config", tomlPath, "index", "check", "extra"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for extra index check args, got nil")
 	}
 }

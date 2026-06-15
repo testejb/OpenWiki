@@ -34,9 +34,19 @@ func setupTestWiki(t *testing.T, dir string) string {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	tomlPath := filepath.Join(dir, "openwiki.toml")
+	wikiRootAbs := filepath.Join(dir, "test-wiki")
+	tomlPath := filepath.Join(wikiRootAbs, "openwiki.toml")
+	configContent := `wiki_root = "."
 
-	pageDir := filepath.Join(wikiRoot, "wiki", "pages")
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+`
+	if err := os.WriteFile(tomlPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	pageDir := filepath.Join(wikiRootAbs, "wiki", "pages")
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
 		t.Fatalf("mkdir pages failed: %v", err)
 	}
