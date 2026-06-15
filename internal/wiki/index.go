@@ -1,6 +1,7 @@
 package wiki
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,7 @@ type IndexRebuildResult struct {
 	RebuiltFiles []string `json:"rebuilt_files"`
 	PageCount    int      `json:"page_count"`
 	BackupPath   string   `json:"backup_path,omitempty"`
+	BackupPaths  []string `json:"backup_paths,omitempty"`
 }
 
 func CheckIndex(fs FS, root string) (*IndexCheckResult, error) {
@@ -48,27 +50,19 @@ func CheckIndex(fs FS, root string) (*IndexCheckResult, error) {
 	}
 	result.PageCount = len(pages)
 
-	indexed := make(map[string]bool)
-	for _, rel := range []string{
+	linksByShard := readShardLinks(fs, root, []string{
 		"wiki/indexes/scopes.md",
 		"wiki/indexes/entities.md",
 		"wiki/indexes/concepts.md",
 		"wiki/indexes/tags.md",
 		"wiki/indexes/recent.md",
-		"wiki/indexes/hot.md",
-	} {
-		data, err := fs.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			continue
-		}
-		for _, slug := range extractWikiLinks(string(data)) {
-			indexed[slug] = true
-		}
-	}
+	})
 
 	for _, page := range pages {
-		if !indexed[page.Slug] {
-			result.UnindexedPages = append(result.UnindexedPages, page.Slug)
+		for _, rel := range requiredCoverageShards(page) {
+			if !linksByShard[rel][page.Slug] {
+				result.UnindexedPages = append(result.UnindexedPages, formatMissingCoverage(page.Slug, rel))
+			}
 		}
 	}
 	sort.Strings(result.MissingFiles)
@@ -93,25 +87,17 @@ func RebuildIndex(fs FS, root string) (*IndexRebuildResult, error) {
 	}
 
 	result := &IndexRebuildResult{PageCount: len(pages)}
-	indexPath := filepath.Join(root, "wiki", "index.md")
-	if data, err := fs.ReadFile(indexPath); err == nil {
-		backupRel := fmt.Sprintf("wiki/index.md.bak-%s", time.Now().Format("20060102150405"))
-		backupPath := filepath.Join(root, backupRel)
-		if err := fs.WriteFile(backupPath, data, 0644); err != nil {
-			return nil, fmt.Errorf("备份 index.md 失败: %w", err)
-		}
-		result.BackupPath = backupRel
-	}
+	queryUsage := ensureQueryUsage(fs, root)
 
 	files := map[string]string{
-		"wiki/index.md":                  buildRoutingIndex(len(pages), countQueryUsage(fs, root)),
+		"wiki/index.md":                  buildRoutingIndex(len(pages), countQueryUsageContent(queryUsage)),
 		"wiki/indexes/scopes.md":         buildScopesIndex(pages),
 		"wiki/indexes/entities.md":       buildTypeIndex(pages, "entity"),
 		"wiki/indexes/concepts.md":       buildTypeIndex(pages, "concept"),
 		"wiki/indexes/tags.md":           buildTagsIndex(pages),
 		"wiki/indexes/recent.md":         buildRecentIndex(pages),
-		"wiki/indexes/hot.md":            buildHotIndex(fs, root),
-		"wiki/indexes/query-usage.jsonl": ensureQueryUsage(fs, root),
+		"wiki/indexes/hot.md":            buildHotIndex(queryUsage),
+		"wiki/indexes/query-usage.jsonl": queryUsage,
 	}
 
 	var rels []string
@@ -119,6 +105,9 @@ func RebuildIndex(fs FS, root string) (*IndexRebuildResult, error) {
 		rels = append(rels, rel)
 	}
 	sort.Strings(rels)
+	if err := backupExistingIndexFiles(fs, root, rels, result); err != nil {
+		return nil, err
+	}
 	for _, rel := range rels {
 		if err := fs.WriteFile(filepath.Join(root, rel), []byte(files[rel]), 0644); err != nil {
 			return nil, fmt.Errorf("写入索引文件失败 %s: %w", rel, err)
@@ -127,6 +116,119 @@ func RebuildIndex(fs FS, root string) (*IndexRebuildResult, error) {
 	}
 
 	return result, nil
+}
+
+func readShardLinks(fs FS, root string, rels []string) map[string]map[string]bool {
+	linksByShard := make(map[string]map[string]bool)
+	for _, rel := range rels {
+		linksByShard[rel] = map[string]bool{}
+		data, err := fs.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		for _, slug := range extractWikiLinks(string(data)) {
+			linksByShard[rel][slug] = true
+		}
+	}
+	return linksByShard
+}
+
+func requiredCoverageShards(page PageMeta) []string {
+	shards := []string{"wiki/indexes/recent.md"}
+	if len(page.Tags) > 0 {
+		shards = append(shards, "wiki/indexes/tags.md")
+	}
+	if page.ScopeLevel != "" || page.ScopeCode != "" {
+		shards = append(shards, "wiki/indexes/scopes.md")
+	}
+	switch page.Type {
+	case "entity":
+		shards = append(shards, "wiki/indexes/entities.md")
+	case "concept":
+		shards = append(shards, "wiki/indexes/concepts.md")
+	}
+	return shards
+}
+
+func formatMissingCoverage(slug, rel string) string {
+	return fmt.Sprintf("%s (missing %s)", slug, rel)
+}
+
+func backupExistingIndexFiles(fs FS, root string, rels []string, result *IndexRebuildResult) error {
+	for _, rel := range rels {
+		data, err := fs.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		backupRel := uniqueBackupRel(fs, root, rel)
+		if err := fs.WriteFile(filepath.Join(root, backupRel), data, 0644); err != nil {
+			return fmt.Errorf("备份索引文件失败 %s: %w", rel, err)
+		}
+		result.BackupPaths = append(result.BackupPaths, backupRel)
+		if rel == "wiki/index.md" {
+			result.BackupPath = backupRel
+		}
+	}
+	return nil
+}
+
+func uniqueBackupRel(fs FS, root, rel string) string {
+	for i := 0; ; i++ {
+		suffix := time.Now().Format("20060102150405.000000000")
+		candidate := fmt.Sprintf("%s.bak-%s", rel, suffix)
+		if i > 0 {
+			candidate = fmt.Sprintf("%s.bak-%s.%d", rel, suffix, i)
+		}
+		if _, err := fs.Stat(filepath.Join(root, candidate)); err != nil {
+			return candidate
+		}
+	}
+}
+
+type queryUsageRecord struct {
+	CitedPages []string `json:"cited_pages"`
+	ReadPages  []string `json:"read_pages"`
+	IntentTags []string `json:"intent_tags"`
+	Time       string   `json:"time"`
+}
+
+func summarizeQueryUsage(content string) (map[string]int, map[string]int, map[string]string) {
+	pageCounts := map[string]int{}
+	tagCounts := map[string]int{}
+	latest := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record queryUsageRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+		for _, page := range append(record.CitedPages, record.ReadPages...) {
+			if page == "" {
+				continue
+			}
+			pageCounts[page]++
+			if record.Time > latest[page] {
+				latest[page] = record.Time
+			}
+		}
+		for _, tag := range record.IntentTags {
+			if tag != "" {
+				tagCounts[tag]++
+			}
+		}
+	}
+	return pageCounts, tagCounts, latest
+}
+
+func countQueryUsageContent(content string) int {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "\n"))
 }
 
 func extractWikiLinks(content string) []string {
@@ -267,8 +369,33 @@ func buildRecentIndex(pages []PageMeta) string {
 	return sb.String()
 }
 
-func buildHotIndex(fs FS, root string) string {
-	return `# 热门入口
+func buildHotIndex(queryUsage string) string {
+	pageCounts, tagCounts, latest := summarizeQueryUsage(queryUsage)
+
+	var pages []string
+	for page := range pageCounts {
+		pages = append(pages, page)
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		if pageCounts[pages[i]] == pageCounts[pages[j]] {
+			return pages[i] < pages[j]
+		}
+		return pageCounts[pages[i]] > pageCounts[pages[j]]
+	})
+
+	var tags []string
+	for tag := range tagCounts {
+		tags = append(tags, tag)
+	}
+	sort.Slice(tags, func(i, j int) bool {
+		if tagCounts[tags[i]] == tagCounts[tags[j]] {
+			return tags[i] < tags[j]
+		}
+		return tagCounts[tags[i]] > tagCounts[tags[j]]
+	})
+
+	var sb strings.Builder
+	sb.WriteString(`# 热门入口
 
 > 自动生成自最近查询记录。
 
@@ -276,12 +403,20 @@ func buildHotIndex(fs FS, root string) string {
 
 | 页面 | 命中次数 | 最近命中 | 常见问题 |
 |---|---:|---|---|
-
+`)
+	for _, page := range pages {
+		sb.WriteString(fmt.Sprintf("| [[%s]] | %d | %s | |\n", page, pageCounts[page], latest[page]))
+	}
+	sb.WriteString(`
 ## 高频查询主题
 
 | 主题 | 相关页面 | 命中次数 |
 |---|---|---:|
-`
+`)
+	for _, tag := range tags {
+		sb.WriteString(fmt.Sprintf("| %s | | %d |\n", tag, tagCounts[tag]))
+	}
+	return sb.String()
 }
 
 func ensureQueryUsage(fs FS, root string) string {
