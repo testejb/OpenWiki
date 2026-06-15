@@ -35,6 +35,25 @@ Resolve `wiki_root` from `openwiki.toml`, then locate:
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
+
+## CLI Index Command Guardrail
+
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
+
+```bash
+openwiki --help | grep -q "index"
+```
+
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
+
+```bash
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
+```
+
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
+
 ## Process
 
 ### 1. Accept the source
@@ -65,15 +84,15 @@ Wait for the user's response before proceeding.
 
 ### 4. Network supplement when useful
 
-For core concepts or key claims, use `agent-browser` to fetch current authoritative sources. Prioritize official or authoritative sites for the topic.
+For core concepts or key claims, use `agent-browser` to fetch current authoritative sources. Prioritize official or authoritative sites for the topic. External facts must preserve the source URL or a saved raw snapshot path.
 
 ### 5. Generate slugs
 
-Use lowercase, hyphen-separated slugs with no special characters. For Chinese titles, translate the title meaning to English and slugify it; do not use pinyin by default.
+Use `references/slug-rules.md` for slug generation. Core rule: lowercase, hyphen-separated slugs with no special characters. For Chinese titles, translate the title meaning to English and slugify it; do not use pinyin by default.
 
 ### 6. Write or update wiki pages directly
 
-Write Markdown files directly using the project templates and existing page style:
+Before writing summary, entity, or concept pages, read `references/page-template.md`. Write Markdown files directly using that template guidance and the existing page style:
 
 - Summary pages: `wiki/pages/<slug>.md`
 - Entity pages: `entities/<slug>.md`
@@ -93,7 +112,7 @@ For each entity or concept touched by this source:
 
 - **Page exists:** read it, update the relevant section, update `updated`.
 - **Page does not exist:** create it with the same frontmatter format.
-- Keep source-backed claims cited or traceable to the ingested source.
+- Keep source-backed claims cited or traceable to the ingested source. External facts must preserve a URL or raw snapshot path so later readers can verify provenance.
 
 ### 8. Backlink audit
 
@@ -154,4 +173,4 @@ openwiki index rebuild
 
 ### 12. Cloud Sync
 
-If `remote_sync_path` and `auto_sync` are configured in `openwiki.toml`, sync `wiki_root` to the remote location using the configured workflow. Sync failure does not block ingest; report it separately.
+Read `references/cloud-sync.md` before syncing. If `remote_sync_path` and `auto_sync` are configured in `openwiki.toml`, sync `wiki_root` to the remote location using the configured workflow. Sync failure does not block ingest; report it separately.

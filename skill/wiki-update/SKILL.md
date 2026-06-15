@@ -33,6 +33,25 @@ Resolve `wiki_root` from `openwiki.toml`, then locate:
 
 Do not depend on legacy agent-specific files or compatibility directories.
 
+
+## CLI Index Command Guardrail
+
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
+
+```bash
+openwiki --help | grep -q "index"
+```
+
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
+
+```bash
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
+```
+
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
+
 ## Process
 
 ### 1. Identify what to update

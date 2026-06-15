@@ -36,6 +36,25 @@ Do not depend on legacy agent-specific files or compatibility directories.
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
+
+## CLI Index Command Guardrail
+
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
+
+```bash
+openwiki --help | grep -q "index"
+```
+
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
+
+```bash
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
+```
+
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
+
 ## Process
 
 ### 1. Build the page inventory
@@ -66,7 +85,7 @@ Apply the repository lint rules where available. Categorize findings by severity
 
 Language-specific rules should follow `primary_language` and `secondary_language` in `openwiki.toml`.
 
-## Layered Index Checks
+### 2.1 Layered Index Checks
 
 Audit:
 

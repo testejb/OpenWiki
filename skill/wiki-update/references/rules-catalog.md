@@ -8,12 +8,12 @@
 
 ### broken-links
 
-**触发条件**: 页面中存在 `[[slug]]` 交叉引用，但 `wiki/pages/<slug>.md` 文件不存在。
+**触发条件**: `wiki/pages/`、`entities/`、`concepts/` 中的页面存在 `[[slug]]` 交叉引用，但该 slug 在三类页面目录中均不存在。
 
 **检查逻辑**:
-1. 扫描所有 `wiki/pages/*.md` 中的 `[[...]]` 引用
-2. 对每个引用，检查 `wiki/pages/<slug>.md` 是否存在
-3. 不存在的引用标记为断链
+1. 扫描 `wiki/pages/*.md`、`entities/*.md`、`concepts/*.md` 中的 `[[...]]` 引用
+2. 对每个引用，检查 `wiki/pages/<slug>.md`、`entities/<slug>.md`、`concepts/<slug>.md` 是否存在
+3. 三处均不存在的引用标记为断链
 
 **修复建议**: 创建缺失的页面，或修正 slug 拼写，或移除无效引用。
 
@@ -21,7 +21,7 @@
 
 ### missing-frontmatter
 
-**触发条件**: `wiki/pages/*.md` 文件缺少 YAML frontmatter（`---...---` 包裹的元数据块）。
+**触发条件**: `wiki/pages/*.md`、`entities/*.md`、`concepts/*.md` 文件缺少 YAML frontmatter（`---...---` 包裹的元数据块）。
 
 **检查逻辑**:
 1. 读取每个页面文件的前 5 行
@@ -36,13 +36,14 @@
 
 ### orphan-pages
 
-**触发条件**: 页面存在于 `wiki/pages/` 中，但没有任何其他页面引用它，且不在 `wiki/index.md` 的任何分类中。
+**触发条件**: 页面存在于 `wiki/pages/`、`entities/` 或 `concepts/` 中，但没有任何其他页面引用它，且没有出现在对应的 Shard Index 中。顶层 `wiki/index.md` 是 Routing Index，不作为页面收录依据。
 
 **检查逻辑**:
 1. 构建所有页面的被引用计数
-2. 标记被引用计数为 0 的页面
+2. 读取 `wiki/indexes/scopes.md`、`wiki/indexes/entities.md`、`wiki/indexes/concepts.md`、`wiki/indexes/tags.md`、`wiki/indexes/recent.md`
+3. 标记被引用计数为 0 且未出现在适当 Shard Index 中的页面
 
-**修复建议**: 在相关页面中添加交叉引用，或在 index.md 中注册该页面。
+**修复建议**: 在相关页面中添加交叉引用，更新对应 Shard Index，或运行 `openwiki index rebuild`。不要把页面注册到顶层 `wiki/index.md`。
 
 ---
 
@@ -236,7 +237,7 @@
 
 **触发条件**: 生成文件中残留字面量 `<today>` 或使用明显非当前日期的硬编码日期。
 
-**检查范围**: `wiki/pages/*.md`、`concepts/*.md`、`wiki/index.md`、`wiki/log.md`
+**检查范围**: `wiki/pages/*.md`、`entities/*.md`、`concepts/*.md`、`wiki/index.md`、`wiki/indexes/*.md`、`wiki/indexes/query-usage.jsonl`、`wiki/log.md`
 
 **检查逻辑**:
 1. 扫描生成文件内容

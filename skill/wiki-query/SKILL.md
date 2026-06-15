@@ -35,6 +35,24 @@ Do not depend on legacy agent-specific files or compatibility directories.
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
+## CLI Index Command Guardrail
+
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
+
+```bash
+openwiki --help | grep -q "index"
+```
+
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
+
+```bash
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
+```
+
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
+
 ## Query Flow
 
 1. Read `openwiki.toml` and resolve `wiki_root`.
@@ -59,7 +77,7 @@ Append query usage as one JSON object per line:
 {"time":"2026-06-15T15:30:00+08:00","query":"用户问题","matched_indexes":["indexes/tags.md"],"read_pages":["slug"],"cited_pages":["slug"],"intent_tags":["tag"]}
 ```
 
-Use the actual timestamp, original user query, matched shard index paths, pages read, pages cited, and inferred intent tags.
+Use the actual timestamp, original user query, matched shard index paths, pages read, pages cited, and inferred intent tags. Record usage even for no-hit or partial-index-failure cases when possible; use empty arrays plus optional `status` and `notes` fields when needed, for example `"status":"no_hit"` or `"status":"partial_index_failure"`. If appending `wiki/indexes/query-usage.jsonl` fails, warn the user but do not fail the answer. Still append a `query` record to `wiki/log.md` when possible.
 
 ## Outside supplement if needed
 
@@ -92,7 +110,7 @@ If yes:
 
 If no:
 
-- still append a `query` record to `wiki/log.md` noting the pages read and whether outside verification was used.
+- still append a `query` record to `wiki/log.md` noting the pages read and whether outside verification was used. If the query produced no local hits, record that fact in both `wiki/indexes/query-usage.jsonl` when possible and `wiki/log.md` when possible.
 
 ## Common Mistakes
 
