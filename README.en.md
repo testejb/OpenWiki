@@ -1,4 +1,4 @@
-# LLM Wiki — AI-Powered Personal Knowledge Base
+# OpenWiki — AI-Powered Personal Knowledge Base
 
 **Language / 语言 / 言語：** [中文](README.md) ｜ English（default）｜ [日本語](README.ja.md)
 
@@ -6,42 +6,54 @@
 
 ## What is this?
 
-LLM Wiki is a personal knowledge-base scaffold for `skill.io`-compatible agents. Raw material lives in `raw/`, structured knowledge lives in `wiki/`, and saved analyses live in `concepts/`. The repository exposes public skills through `skill/` and uses `openwiki.toml` as the instance-level runtime contract.
+OpenWiki is a file-first personal knowledge-base scaffold for AI skills and agents. Markdown files are the primary write interface, and AI skills edit knowledge files directly. The CLI does not own content authoring; it provides guardrails for config discovery, validation, status, index checks, and index rebuilds.
 
 **Core idea:**
-- `openwiki.toml` is the canonical runtime contract
-- `skill/` is the canonical public wiki skill directory
-- `config-dir` and `wiki-root` may be fully separated
-- `raw/` stores immutable sources while `wiki/` is maintained by AI
+
+- `openwiki.toml` is the only canonical runtime contract.
+- The default `wiki_root` is `./openwiki/`.
+- OpenWiki prefers a project-local runtime model: config and wiki data are discovered and used with the project.
+- `wiki/index.md` is a lightweight Routing Index and does not list every page.
+- `wiki/indexes/` contains Shard Indexes for growing indexes.
 
 ---
 
 ## Runtime Model
 
-```text
-<config-dir>/
-└── openwiki.toml            # runtime contract with absolute wiki_root
-
-<wiki-root>/
-├── raw/               # source material
-├── wiki/
-│   ├── index.md       # global index
-│   ├── log.md         # operation log
-│   └── pages/         # topic pages
-└── concepts/          # analyses, answers, reports
-```
-
-Public skills live in:
+OpenWiki uses a project-local runtime model:
 
 ```text
-skill/
-├── wiki-init/
-├── wiki-ingest/
-├── wiki-query/
-├── wiki-lint/
-├── wiki-update/
-└── agent-browser/
+<project>/
+├── openwiki.toml            # only canonical runtime contract; target project-level contract
+└── openwiki/                # default wiki_root
+    ├── raw/                 # source material
+    ├── wiki/
+    │   ├── index.md         # lightweight Routing Index
+    │   ├── log.md           # operation log
+    │   ├── pages/           # regular knowledge pages
+    │   └── indexes/         # Shard Indexes
+    │       ├── scopes.md
+    │       ├── entities.md
+    │       ├── concepts.md
+    │       ├── tags.md
+    │       ├── recent.md
+    │       ├── hot.md
+    │       └── query-usage.jsonl
+    ├── entities/            # entity pages
+    └── concepts/            # concepts, analyses, saved answers
 ```
+
+Core principles:
+
+- `openwiki.toml` is the only canonical runtime contract.
+- The default `wiki_root` is `./openwiki/`.
+- Markdown page files are the source of truth for content.
+- `wiki/index.md` is a lightweight Routing Index for routing only; it does not list every page.
+- `wiki/indexes/` contains Shard Indexes: `scopes.md`, `entities.md`, `concepts.md`, `tags.md`, `recent.md`, `hot.md`, and `query-usage.jsonl`.
+- AI skills write Markdown files directly.
+- The CLI provides guardrails for config discovery, validation, status, `index check`, and `index rebuild`.
+
+> The current CLI implementation of `openwiki init` writes `openwiki.toml` inside the target wiki root. To use the project-level contract model above, place `openwiki.toml` at the project root with `wiki_root = "./openwiki"`, or pass that file with `--config` / `-c`.
 
 ---
 
@@ -49,39 +61,114 @@ skill/
 
 ### Prerequisites
 
-- Any `skill.io`-compatible agent or tool
+- Any `skill.io`-compatible agent or any AI agent/tool that can read this repository's skills
 - (Optional) [agent-browser](https://github.com/mediar-ai/agent-browser) for web-augmented research
-  ```bash
-  brew install mediar-ai/agent-browser/agent-browser
-  ```
 
 ### Installation
 
 ```bash
-git clone https://github.com/crabin/llm-wiki.git my-wiki
-cd my-wiki
+git clone https://github.com/crabin/llm-wiki.git openwiki-project
+cd openwiki-project
 ```
 
-Load the repository into your compatible agent and ensure it can read the public wiki skills in `skill/`.
+Load this repository into your AI agent and ensure it can read the public wiki skills under `skill/`.
 
-### Usage
+### Initialization
 
-1. Run `wiki-init`
-2. Choose a `config-dir`, such as `~/.openwiki`
-3. Choose a `wiki-root`, such as `~/data/my-wiki`
-4. Let `wiki-init` write `<config-dir>/openwiki.toml` with an absolute `wiki_root`
-5. Put source material into `<wiki-root>/raw/` and run `wiki-ingest`
-6. Use `wiki-query`, `wiki-lint`, and `wiki-update` for ongoing work
+The current CLI initializes a wiki root:
 
-Runtime discovery order:
-- prefer an explicitly provided `config-dir`
-- otherwise check the default config directory at `~/.openwiki/openwiki.toml`
-- if the default config is not found or invalid, search upward from the current working directory for `openwiki.toml`
-- if still missing, ask for an absolute config-dir or run `wiki-init`
+```bash
+openwiki init ./openwiki/
+```
 
-If the explicitly provided `config-dir` already contains a valid `openwiki.toml`, `wiki-init` should say it is connected to the existing wiki, reuse that runtime contract, and suggest continuing with the same `config-dir` in `wiki-query`, `wiki-ingest`, `wiki-lint`, and `wiki-update`.
+This command creates `./openwiki/` and writes `openwiki.toml`, `wiki/index.md`, `wiki/indexes/`, `raw/`, `entities/`, and `concepts/` inside that directory.
 
-### E2E Testing
+For a project-local top-level contract, use this `openwiki.toml` at the project root:
+
+```toml
+wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+```
+
+Then pass it explicitly when needed:
+
+```bash
+openwiki --config ./openwiki.toml status
+openwiki --config ./openwiki.toml index check
+openwiki --config ./openwiki.toml index rebuild
+```
+
+Discovery order:
+
+1. `--config` / `-c`
+2. `OPENWIKI_CONFIG`
+3. Search upward from the current working directory for `openwiki.toml`
+4. `~/.openwiki/openwiki.toml`
+
+---
+
+## Repository Layout
+
+```text
+openwiki-project/
+├── skill/                    # public wiki skills
+│   ├── wiki-init/
+│   ├── wiki-ingest/
+│   ├── wiki-query/
+│   ├── wiki-lint/
+│   ├── wiki-update/
+│   └── agent-browser/
+├── openwiki.toml             # project-local runtime contract (target model; may be passed with --config)
+├── openwiki/                 # default wiki_root
+│   ├── raw/
+│   ├── wiki/
+│   │   ├── index.md          # Routing Index
+│   │   ├── log.md
+│   │   ├── pages/
+│   │   └── indexes/          # Shard Indexes
+│   │       ├── scopes.md
+│   │       ├── entities.md
+│   │       ├── concepts.md
+│   │       ├── tags.md
+│   │       ├── recent.md
+│   │       ├── hot.md
+│   │       └── query-usage.jsonl
+│   ├── entities/
+│   └── concepts/
+├── README.md
+├── README.en.md
+└── README.ja.md
+```
+
+---
+
+## Skills and CLI Responsibilities
+
+### AI skills
+
+- `wiki-init`: prepares the project-local contract and wiki file layout.
+- `wiki-ingest`: reads source material, confirms key takeaways with the user, writes Markdown pages directly, and maintains related Shard Indexes.
+- `wiki-query`: reads the `wiki/index.md` Routing Index first, then relevant `wiki/indexes/` shards and pages; valuable answers can be saved under `concepts/`.
+- `wiki-lint`: checks broken links, orphan pages, contradictions, stale content, and index health.
+- `wiki-update`: edits existing Markdown pages directly and updates backlinks, logs, and shard indexes.
+- `agent-browser`: performs web retrieval and fact-checking, supplying citable URLs and page content.
+
+### CLI guardrails
+
+The CLI handles runtime guardrails that do not own content authoring:
+
+- discover `openwiki.toml` and resolve `wiki_root`;
+- validate required directories, `wiki/index.md`, and `wiki/indexes/`;
+- report status and index health;
+- run `openwiki index check` to check the Routing Index and Shard Indexes;
+- run `openwiki index rebuild` to rebuild indexes from Markdown pages and `query-usage.jsonl`.
+
+---
+
+## E2E Testing
 
 - Fast deterministic artifact E2E:
   ```bash
@@ -96,99 +183,17 @@ If the explicitly provided `config-dir` already contains a valid `openwiki.toml`
   SKILL_AGENT_E2E=1 SKILL_AGENT_RUNNER=/path/to/compatible-agent-wrapper python3 -m unittest tests.test_agent_skill_smoke_e2e -v
   ```
 
-Notes:
-- `tests.test_wiki_skill_workflow_e2e` uses only local fixtures and temporary directories, with no network dependency.
-- `tests.test_agent_skill_smoke_e2e` skips the real runner scenario by default and only executes it when `SKILL_AGENT_E2E=1` is set.
-- `SKILL_AGENT_RUNNER` must point to an executable compatible wrapper, using either an absolute path or a path relative to the repository root.
-- Compatible wrapper contract: start with no extra arguments, read the prompt from `stdin`, and write results to `stdout`; by default it runs inside the `repository root`, but smoke tests may override the working directory to validate upward `openwiki.toml` discovery.
-
----
-
-## Repository Layout
-
-```text
-llm-wiki/
-├── skill/             # only public wiki skill directory
-│   ├── wiki-init/
-│   ├── wiki-ingest/
-│   ├── wiki-query/
-│   ├── wiki-lint/
-│   ├── wiki-update/
-│   └── agent-browser/
-├── openwiki.toml            # runtime contract for this repository instance
-├── raw/
-├── wiki/
-│   ├── index.md
-│   ├── log.md
-│   └── pages/
-├── concepts/
-├── README.md
-├── README.en.md
-└── README.ja.md
-```
-
----
-
-## Skill Asset Boundary
-
-- See `skill/ASSET-LAYOUT.md` for the public wiki skill boundary rules
-- A `skill-private asset` must live inside the owning `skill/<name>/` directory tree
-- `runtime` wiki objects remain `openwiki.toml` plus `raw/`, `wiki/`, and `concepts/` under `wiki_root`
-- Approved skill-local directory names:
-  - `templates/`
-  - `examples/`
-  - `fixtures/`
-  - `assets/`
-  - `scripts/`
-
----
-
-## Skills
-
-### wiki-init
-
-- collects separate `config-dir` and `wiki-root`
-- writes `openwiki.toml` into the configuration directory
-- initializes `raw/`, `wiki/index.md`, `wiki/log.md`, `wiki/pages/`, and `concepts/` under `wiki-root`
-
-### wiki-ingest
-
-- reads new sources and discusses takeaways first
-- resolves runtime paths through `openwiki.toml`
-- updates pages, backlinks, index, and log
-
-### wiki-query
-
-- always reads `wiki/index.md` and relevant pages first
-- uses `agent-browser` only when local wiki data is insufficient
-- always offers to save valuable answers into `concepts/`
-
-### wiki-lint
-
-- detects broken links, orphan pages, contradictions, and stale content
-- writes reports to `concepts/lint-<date>.md`
-- shows diffs before fixes are applied
-
-### wiki-update
-
-- revises existing wiki pages
-- confirms page-by-page
-- checks downstream impact and logs every change
-
-### agent-browser
-
-- provides web retrieval and fact-checking
-- prefers authoritative sources
-- supplies URLs and page content that wiki workflows can cite
+The real runner scenario is skipped by default and only runs when `SKILL_AGENT_E2E=1` is set.
 
 ---
 
 ## Design Principles
 
-- **Neutral runtime**: runtime behavior depends on `openwiki.toml`, not agent-specific file names
-- **Single public skill surface**: public skills are maintained only in `skill/`
-- **Knowledge compounding**: new knowledge should connect to the existing graph
-- **Traceable sources**: important claims should point to file paths or URLs
+- **File-first**: Markdown files are the primary source of truth for knowledge content.
+- **Neutral runtime**: runtime behavior depends on `openwiki.toml`, not agent-specific file names.
+- **Layered indexing**: the Routing Index stays lightweight, while Shard Indexes carry growth.
+- **AI writes, CLI guards**: AI skills edit content; the CLI discovers, validates, and repairs indexes.
+- **Traceable sources**: important claims should point to file paths or URLs.
 
 ---
 
