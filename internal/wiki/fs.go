@@ -190,7 +190,7 @@ type memFileInfo struct {
 func (m *memFileInfo) Name() string       { return m.name }
 func (m *memFileInfo) Size() int64        { return m.size }
 func (m *memFileInfo) Mode() os.FileMode  { return 0644 }
-func (m *memFileInfo) ModTime() time.Time  { return time.Time{} }
+func (m *memFileInfo) ModTime() time.Time { return time.Time{} }
 func (m *memFileInfo) IsDir() bool        { return m.isDir }
 func (m *memFileInfo) Sys() interface{}   { return nil }
 
@@ -199,7 +199,9 @@ type memDirEntry struct {
 	isDir bool
 }
 
-func (m *memDirEntry) Name() string               { return m.name }
-func (m *memDirEntry) IsDir() bool                { return m.isDir }
-func (m *memDirEntry) Type() os.FileMode          { return 0 }
-func (m *memDirEntry) Info() (os.FileInfo, error) { return &memFileInfo{name: m.name, isDir: m.isDir}, nil }
+func (m *memDirEntry) Name() string      { return m.name }
+func (m *memDirEntry) IsDir() bool       { return m.isDir }
+func (m *memDirEntry) Type() os.FileMode { return 0 }
+func (m *memDirEntry) Info() (os.FileInfo, error) {
+	return &memFileInfo{name: m.name, isDir: m.isDir}, nil
+}

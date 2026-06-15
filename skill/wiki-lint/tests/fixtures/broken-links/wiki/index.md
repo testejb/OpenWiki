@@ -1,10 +1,11 @@
-## Wiki 页面
+# OpenWiki Routing Index
 
-| 页面 | 摘要 | 标签 | 最后更新 |
-|------|------|------|----------|
-| [[page-with-broken-link]] | 包含断链的页面 | test, broken | 2026-06-01 |
+## 检索路由
 
-## 适用范围
-
-### broken-links
-- [[page-with-broken-link]] — 代码仓库 | 2026-06-01
+- Scope lookup: `wiki/indexes/scopes.md`
+- Entity lookup: `wiki/indexes/entities.md`
+- Concept lookup: `wiki/indexes/concepts.md`
+- Tag lookup: `wiki/indexes/tags.md`
+- Recent lookup: `wiki/indexes/recent.md`
+- Hot lookup: `wiki/indexes/hot.md`
+- Query usage log: `wiki/indexes/query-usage.jsonl`
