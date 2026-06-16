@@ -4,7 +4,7 @@
 
 ## 抽取目标
 
-保持平衡召回：宁可保留可能有复用价值的候选供用户审核，也不要把低信号、重复或不可靠内容全部塞入审核文档。候选不是正式 wiki 内容，只有审核文档中被勾选的候选才能进入后续 ingest/update。
+保持平衡召回：宁可保留可能有复用价值的候选供用户审核，也不要把低信号或不可靠内容全部塞入审核文档。本期不做 candidate-level deduplication；相似候选可以重复出现，由用户在飞书中判断。候选不是正式 wiki 内容，只有审核文档中被勾选的候选才能进入后续 ingest/update。
 
 ## 8 类候选
 
@@ -26,7 +26,7 @@
 - 闲聊、寒暄、情绪表达、无行动价值的状态更新。
 - 只对一次性本地临时路径、临时文件名、终端窗口状态有效的信息。
 - 未验证的猜测、模型自我反思、没有证据的结论。
-- 重复内容；仅保留最完整、来源最清晰的一条。
+- 不要因为相似或重复就自行合并候选；相似候选可以重复出现，由用户在飞书中判断。
 - 大段代码、日志或 diff；只提炼可复用规则，并保留可追溯来源。
 - 与 OpenWiki、项目知识沉淀、工具流程无关的普通实现细节。
 - 用户明确表示不要记录、不要外传、仅当前会话临时使用的信息。
@@ -45,8 +45,8 @@
 脱敏时遵守：
 
 - 保留判断上下文需要的非敏感结构，例如变量名、配置键名、错误类型。
-- 不要脱敏普通来源链接本身，除非链接包含凭据或敏感查询参数。
-- 明确保留 external URL 和 Feishu URL 的原始链接；如果链接含敏感参数，只脱敏敏感参数并说明已脱敏。
+- 普通 external URL 和 Feishu URL 必须原样保留。
+- 如果 URL 含 `token`、`key`、`signature`、`auth`、`password`、`secret`、`cookie`、`session` 等敏感 query，只脱敏敏感参数值，并在 `risk_and_redaction` 说明。
 
 ## Candidate Field Requirements
 
@@ -61,11 +61,11 @@
 - `proposed_content`：建议写入 wiki 的候选内容草稿，使用中文，避免未经审核的绝对化表述。
 - `evidence`：来自 pending 记录的证据摘要或引用定位，避免粘贴大段原文。
 - `risk_and_redaction`：风险、敏感信息处理、脱敏说明；无风险也写 `none`。
-- `original_links`：原样保留 external URL 和 Feishu URL 原始链接；没有则为空列表。
+- `original_links`：普通 external URL 和 Feishu URL 原样保留；如果 URL 含敏感 query，只脱敏敏感参数值；没有则为空列表。
 
 ## 链接保留要求
 
-- external URL 必须保留原始链接，不改写、不短链化、不翻译。
-- Feishu URL 必须保留原始链接，不替换为标题或截图。
+- 普通 external URL 必须原样保留，不改写、不短链化、不翻译。
+- 普通 Feishu URL 必须原样保留，不替换为标题或截图。
 - 同一候选有多个来源链接时全部列出，除非完全重复。
-- 如果 URL query 含敏感参数，只脱敏敏感参数值，保留 URL 的来源可识别性。
+- 如果 URL query 含 `token`、`key`、`signature`、`auth`、`password`、`secret`、`cookie`、`session` 等敏感参数，只脱敏敏感参数值，保留 URL 的来源可识别性，并在 `risk_and_redaction` 说明。

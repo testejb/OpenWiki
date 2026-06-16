@@ -28,7 +28,7 @@ admission: ONLY_CHECKED_CANDIDATES
 
 1. 固定标题：`OpenWiki 候选知识审核 - CodeAgent`。
 2. 协议 block：包含 `OPENWIKI_CANDIDATE_REVIEW_DOC v1`、`source: codeagent`、`admission: ONLY_CHECKED_CANDIDATES`。
-3. 扫描摘要：pending path/ID、state path（如已知）、扫描记录数、候选数、生成时间、snapshot path、review doc URL。
+3. 扫描摘要：pending path/ID、state path（如已知）、扫描记录数、候选数、生成时间、snapshot path。创建前摘要不含 review doc URL；创建后可在 snapshot 和 final report 记录 URL，若要写回文档则作为可选后续更新，不作为必需。
 4. How to review：说明只勾选允许进入 OpenWiki 的候选；未勾选就是拒绝；不要删除协议 block；如复选框不可用，使用标题行 `[x]` fallback。
 5. 候选总览：候选 ID、slug、title、category、target_wiki_area 的表格或列表。
 6. 分类章节：按 8 类候选分组；没有候选的分类可以省略。
@@ -37,7 +37,7 @@ admission: ONLY_CHECKED_CANDIDATES
 
 ## Candidate Card
 
-每个候选卡片必须包含稳定 ID、slug、标题和可解析勾选状态。标题行 checkbox 是唯一 admission signal；正文不能使用 `- [ ] admit`、`- [x] admit` 或任何正文 admit 字段作为准入信号。
+每个候选卡片必须包含稳定 ID、slug、标题和可解析勾选状态。标题行 checkbox 是唯一 admission signal；body checkbox is ignored。正文不能使用 `- [ ] admit`、`- [x] admit` 或任何正文 admit 字段作为准入信号。
 
 Feishu 原生复选框标题行格式：
 
@@ -77,7 +77,7 @@ Feishu 原生复选框标题行格式：
 - 无固定标题、无协议头、协议头被改写、source 不匹配或 admission 不是 `ONLY_CHECKED_CANDIDATES` 的文档。
 - 没有稳定 `candidate_id` 或 `slug` 的候选。
 - 被用户删除的候选。
-- 正文 `- [ ] admit`、`- [x] admit` 或任何正文 admit 字段。
+- 正文 `- [ ] admit`、`- [x] admit`、任何正文 admit 字段或任何 body checkbox。
 - 看似同意但没有标题行 checkbox checked 或标题行 `[x]` fallback 的自然语言评论。
 
 ## Fallback `[x]`
@@ -89,3 +89,7 @@ Feishu 原生复选框标题行格式：
 ```
 
 未勾选 fallback 使用 `[ ] CAND-002｜slug｜title`。不要接受正文 `[x] admit`、`yes`、`Y`、`同意`、`通过`、emoji 或评论回复作为替代标记。
+
+## Admission Source Rule
+
+Snapshot is not an admission source. It only records what was sent to Feishu for traceability. Admission must be parsed from checked title lines in the Feishu review document; body checkbox markers are ignored, title checkbox only. Unchecked candidates are explicit rejection.
