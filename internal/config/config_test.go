@@ -161,6 +161,80 @@ secondary_language = "en"
 	}
 }
 
+func TestSetNestedFieldDoesNotCreateMissingCandidateConfig(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	_, _, err := config.Set(tomlPath, "wiki.primary_language", "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("failed to read test toml: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "[candidate]") {
+		t.Errorf("expected file not to create [candidate], got:\n%s", output)
+	}
+	if strings.Contains(output, "[candidate.codeagent]") {
+		t.Errorf("expected file not to create [candidate.codeagent], got:\n%s", output)
+	}
+	if strings.Contains(output, "enabled = false") {
+		t.Errorf("expected file not to create enabled=false, got:\n%s", output)
+	}
+}
+
+func TestSetNestedFieldPreservesMissingCandidateCodeAgentEnabled(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+
+[candidate]
+state_dir = "candidate-state"
+
+[candidate.codeagent]
+state_path = "state.json"
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	_, _, err := config.Set(tomlPath, "wiki.primary_language", "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("failed to read test toml: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, "[candidate]") {
+		t.Errorf("expected file to preserve [candidate], got:\n%s", output)
+	}
+	if !strings.Contains(output, "[candidate.codeagent]") {
+		t.Errorf("expected file to preserve [candidate.codeagent], got:\n%s", output)
+	}
+	if strings.Contains(output, "enabled = false") {
+		t.Errorf("expected file not to create enabled=false, got:\n%s", output)
+	}
+}
+
 func TestSetTopLevelField(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := filepath.Join(dir, "openwiki.toml")

@@ -89,7 +89,8 @@ func Set(path, key, value string) (oldVal, newVal string, err error) {
 	}
 
 	var fileCfg Config
-	if err := toml.Unmarshal(data, &fileCfg); err != nil {
+	metadata, err := toml.Decode(string(data), &fileCfg)
+	if err != nil {
 		return "", "", fmt.Errorf("解析 TOML 配置失败: %w", err)
 	}
 
@@ -117,11 +118,93 @@ func Set(path, key, value string) (oldVal, newVal string, err error) {
 	defer f.Close()
 
 	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(cfg); err != nil {
+	if err := encoder.Encode(newConfigForWrite(cfg, metadata)); err != nil {
 		return "", "", fmt.Errorf("编码 TOML 失败: %w", err)
 	}
 
 	return oldVal, value, nil
+}
+
+type configForWrite struct {
+	WikiRoot  string                   `toml:"wiki_root"`
+	Wiki      WikiConfig               `toml:"wiki"`
+	Remote    RemoteConfig             `toml:"remote"`
+	Candidate *candidateConfigForWrite `toml:"candidate,omitempty"`
+}
+
+type candidateConfigForWrite struct {
+	StateDir    *string                  `toml:"state_dir,omitempty"`
+	RunLogPath  *string                  `toml:"run_log_path,omitempty"`
+	SnapshotDir *string                  `toml:"snapshot_dir,omitempty"`
+	CodeAgent   *codeAgentConfigForWrite `toml:"codeagent,omitempty"`
+}
+
+type codeAgentConfigForWrite struct {
+	Enabled          *bool                  `toml:"enabled,omitempty"`
+	StatePath        *string                `toml:"state_path,omitempty"`
+	PendingDir       *string                `toml:"pending_dir,omitempty"`
+	RunLogPath       *string                `toml:"run_log_path,omitempty"`
+	SnapshotDir      *string                `toml:"snapshot_dir,omitempty"`
+	InitialDays      *int                   `toml:"initial_days,omitempty"`
+	MaxRecordsPerRun *int                   `toml:"max_records_per_run,omitempty"`
+	Agents           []CandidateAgentConfig `toml:"agents,omitempty"`
+}
+
+func newConfigForWrite(cfg *Config, metadata toml.MetaData) configForWrite {
+	out := configForWrite{
+		WikiRoot: cfg.WikiRoot,
+		Wiki:     cfg.Wiki,
+		Remote:   cfg.Remote,
+	}
+	if !metadata.IsDefined("candidate") {
+		return out
+	}
+
+	candidate := &candidateConfigForWrite{}
+	if metadata.IsDefined("candidate", "state_dir") {
+		candidate.StateDir = &cfg.Candidate.StateDir
+	}
+	if metadata.IsDefined("candidate", "run_log_path") {
+		candidate.RunLogPath = &cfg.Candidate.RunLogPath
+	}
+	if metadata.IsDefined("candidate", "snapshot_dir") {
+		candidate.SnapshotDir = &cfg.Candidate.SnapshotDir
+	}
+	if metadata.IsDefined("candidate", "codeagent") {
+		candidate.CodeAgent = newCodeAgentConfigForWrite(cfg.Candidate.CodeAgent, metadata)
+	}
+	out.Candidate = candidate
+
+	return out
+}
+
+func newCodeAgentConfigForWrite(cfg CandidateCodeAgentConfig, metadata toml.MetaData) *codeAgentConfigForWrite {
+	out := &codeAgentConfigForWrite{}
+	if metadata.IsDefined("candidate", "codeagent", "enabled") {
+		out.Enabled = &cfg.Enabled
+	}
+	if metadata.IsDefined("candidate", "codeagent", "state_path") {
+		out.StatePath = &cfg.StatePath
+	}
+	if metadata.IsDefined("candidate", "codeagent", "pending_dir") {
+		out.PendingDir = &cfg.PendingDir
+	}
+	if metadata.IsDefined("candidate", "codeagent", "run_log_path") {
+		out.RunLogPath = &cfg.RunLogPath
+	}
+	if metadata.IsDefined("candidate", "codeagent", "snapshot_dir") {
+		out.SnapshotDir = &cfg.SnapshotDir
+	}
+	if metadata.IsDefined("candidate", "codeagent", "initial_days") {
+		out.InitialDays = &cfg.InitialDays
+	}
+	if metadata.IsDefined("candidate", "codeagent", "max_records_per_run") {
+		out.MaxRecordsPerRun = &cfg.MaxRecordsPerRun
+	}
+	if metadata.IsDefined("candidate", "codeagent", "agents") {
+		out.Agents = cfg.Agents
+	}
+	return out
 }
 
 func getFieldValue(cfg *Config, key string) (string, error) {
