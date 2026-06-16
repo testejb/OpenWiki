@@ -19,6 +19,16 @@ Such documents are candidate review documents, not ordinary sources.
 - If no candidate cards checked, stop and write nothing.
 - Checked candidate cards represent prior user approval. Do not ask for a second confirmation before ingesting them.
 
+## Interaction override
+
+- Checked cards replace the normal Step 3 confirmation prompt.
+- For checked candidate cards, skip the Step 3 "Anything specific..." wait for user confirmation.
+- Do not ask emphasize/de-emphasize or scope confirmation for checked cards.
+- Use `target_wiki_area`, slug, category, and `proposed_content` from the card.
+- If slug is missing, generate one using `slug-rules.md` and report the generated slug.
+- If proposed content is missing, skip that candidate and report the skipped candidate.
+- The final report may list processed candidates and any skip reasons.
+
 ## Candidate boundary
 
 - A candidate starts at a title line or checkbox block in this format:

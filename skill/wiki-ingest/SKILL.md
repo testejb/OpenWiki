@@ -113,7 +113,11 @@ If both protocol lines are present, read `references/candidate-review-doc.md` an
 
 Only checked candidate cards may be source material. Unchecked candidate cards are explicit user rejection; do not summarize, merge, cite, quote, or use them as background context.
 
-For checked candidate cards, the checkbox is confirmation to ingest. Do not ask for the normal second confirmation before writing pages; continue the existing page-writing, index, log, verify, and report flow.
+For checked candidate cards, the checkbox is confirmation to ingest. Do not ask for the normal second confirmation before writing pages. Explicitly skip the Step 3 "Anything specific..." wait for user confirmation for checked candidate cards.
+
+You may internally use each checked card's reason, proposed content, evidence, and scope information before writing or in the final report, but must not stop to ask for a second confirmation.
+
+Continue the existing page-writing, index, log, verify, and report flow.
 
 If the protocol name `OPENWIKI_CANDIDATE_REVIEW_DOC v1` is present but `admission: ONLY_CHECKED_CANDIDATES` is missing, stop and do not ingest the document as an ordinary source.
 
