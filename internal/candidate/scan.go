@@ -32,24 +32,26 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 	fileUpdates := map[string]FileState{}
 	baseState := map[string]FileState{}
 
-	for _, agent := range cfg.Agents {
-		if !agent.Enabled {
-			continue
-		}
-		paths, pathWarnings := expandAgentPaths(agent)
-		warnings = append(warnings, pathWarnings...)
-		for _, path := range paths {
-			previous := state.Files[path]
-			fileRecords, update, fileWarnings, err := scanOneFile(agent, path, previous, now)
-			warnings = append(warnings, fileWarnings...)
-			if err != nil {
-				return ScanResult{}, err
+	if cfg.Enabled {
+		for _, agent := range cfg.Agents {
+			if !agent.Enabled {
+				continue
 			}
-			if update != nil {
-				fileUpdates[path] = *update
-				baseState[path] = previous
+			paths, pathWarnings := expandAgentPaths(agent)
+			warnings = append(warnings, pathWarnings...)
+			for _, path := range paths {
+				previous := state.Files[path]
+				fileRecords, update, fileWarnings, err := scanOneFile(agent, path, previous, now)
+				warnings = append(warnings, fileWarnings...)
+				if err != nil {
+					return ScanResult{}, err
+				}
+				if update != nil {
+					fileUpdates[path] = *update
+					baseState[path] = previous
+				}
+				records = append(records, fileRecords...)
 			}
-			records = append(records, fileRecords...)
 		}
 	}
 

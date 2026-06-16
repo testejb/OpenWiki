@@ -60,6 +60,45 @@ func TestScanCreatesPendingWithoutAdvancingState(t *testing.T) {
 	}
 }
 
+func TestScanCodeAgentDisabledCreatesEmptyPendingWithoutReadingAgents(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	cfg.Enabled = false
+	cfg.Agents = append(cfg.Agents, candidate.AgentConfig{
+		Name:    "missing",
+		Type:    "traex-history",
+		Paths:   []string{filepath.Join(root, "missing.jsonl")},
+		Enabled: true,
+	})
+
+	result, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+
+	if err != nil {
+		t.Fatalf("ScanCodeAgent returned error: %v", err)
+	}
+	if result.Records.Total != 0 {
+		t.Fatalf("expected disabled scan to return 0 records, got %d", result.Records.Total)
+	}
+	if len(result.Records.ByAgent) != 0 {
+		t.Fatalf("expected disabled scan to have empty agent summary, got %#v", result.Records.ByAgent)
+	}
+	if result.PendingPath == "" {
+		t.Fatalf("expected disabled scan to still create pending path")
+	}
+	pending := loadPendingForTest(t, result.PendingPath)
+	if len(pending.Records) != 0 {
+		t.Fatalf("expected disabled pending records to be empty, got %#v", pending.Records)
+	}
+	if len(pending.StateUpdates) != 0 {
+		t.Fatalf("expected disabled pending state updates to be empty, got %#v", pending.StateUpdates)
+	}
+	if len(pending.Warnings) != 0 {
+		t.Fatalf("expected disabled scan warnings to be empty, got %#v", pending.Warnings)
+	}
+}
+
 func TestScanAppendUsesProcessedBytes(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")

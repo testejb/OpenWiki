@@ -41,6 +41,38 @@ func TestCandidateCodeAgentScanJSON(t *testing.T) {
 	}
 }
 
+func TestCandidateCodeAgentScanJSONRespectsDisabledConfig(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath, _ := setupCandidateCLIConfig(t, dir)
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("read config failed: %v", err)
+	}
+	disabledConfig := strings.Replace(string(data), "[candidate.codeagent]\n", "[candidate.codeagent]\nenabled = false\n", 1)
+	if err := os.WriteFile(tomlPath, []byte(disabledConfig), 0644); err != nil {
+		t.Fatalf("write disabled config failed: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = cli.RunWithIO([]string{"--config", tomlPath, "candidate", "codeagent", "scan", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resp := decodeCLIResponse(t, stdout.Bytes())
+	if !resp.Success {
+		t.Fatalf("expected success=true, got error: %#v", resp.Error)
+	}
+	dataMap := responseDataMap(t, resp)
+	records := dataMap["records"].(map[string]interface{})
+	if records["total"] != float64(0) {
+		t.Fatalf("expected records.total=0 when codeagent is disabled, got %#v", records["total"])
+	}
+	if byAgent, ok := records["by_agent"].(map[string]interface{}); !ok || len(byAgent) != 0 {
+		t.Fatalf("expected records.by_agent to be empty, got %#v", records["by_agent"])
+	}
+}
+
 func TestCandidateCodeAgentScanJSONConfigNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := cli.RunWithIO([]string{"--config", "/nonexistent/openwiki.toml", "candidate", "codeagent", "scan", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
