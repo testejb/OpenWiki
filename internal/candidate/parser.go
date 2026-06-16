@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 )
 
-const maxJSONLScannerBuffer = 1024 * 1024
+const maxJSONLParseWarnings = 20
 
 // ParseJSONLFile parses candidate records from a code agent JSONL file.
 func ParseJSONLFile(agent AgentConfig, path string, startByte int64, startLine int) ([]Record, []Warning, error) {
@@ -31,34 +32,77 @@ func ParseJSONLFile(agent AgentConfig, path string, startByte int64, startLine i
 		return nil, nil, err
 	}
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), maxJSONLScannerBuffer)
+	reader := bufio.NewReader(file)
 
 	var records []Record
 	var warnings []Warning
 	lineNo := startLine
 	byteStart := startByte
+	parseWarningCount := 0
+	parseWarningsTruncated := false
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		rawLine, err := reader.ReadBytes('\n')
+		if len(rawLine) == 0 {
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return records, warnings, err
+			}
+		}
+
 		lineNo++
-		byteEnd := byteStart + int64(len(line)) + 1
+		byteEnd := byteStart + int64(len(rawLine))
+		line := trimJSONLLineEnding(rawLine)
 
 		record, ok, warning := parseJSONLLine(agent, path, line, lineNo, byteStart, byteEnd)
 		if warning != nil {
-			warnings = append(warnings, *warning)
+			if warning.Code == "JSONL_PARSE_FAILED" {
+				parseWarningCount++
+				if parseWarningCount <= maxJSONLParseWarnings {
+					warnings = append(warnings, *warning)
+				} else {
+					parseWarningsTruncated = true
+				}
+			} else {
+				warnings = append(warnings, *warning)
+			}
 		}
 		if ok {
 			records = append(records, record)
 		}
 
 		byteStart = byteEnd
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return records, warnings, err
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return records, warnings, err
+	if parseWarningsTruncated {
+		warnings = append(warnings, Warning{
+			Code:    "JSONL_PARSE_WARNINGS_TRUNCATED",
+			Message: fmt.Sprintf("suppressed %d additional JSONL parse warnings", parseWarningCount-maxJSONLParseWarnings),
+			Path:    path,
+		})
 	}
 
 	return records, warnings, nil
+}
+
+func trimJSONLLineEnding(line []byte) []byte {
+	line = bytesTrimSuffix(line, '\n')
+	line = bytesTrimSuffix(line, '\r')
+	return line
+}
+
+func bytesTrimSuffix(line []byte, suffix byte) []byte {
+	if len(line) > 0 && line[len(line)-1] == suffix {
+		return line[:len(line)-1]
+	}
+	return line
 }
 
 func parseJSONLLine(agent AgentConfig, path string, line []byte, lineNo int, byteStart, byteEnd int64) (Record, bool, *Warning) {

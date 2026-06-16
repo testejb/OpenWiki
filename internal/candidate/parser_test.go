@@ -127,12 +127,150 @@ func TestParseJSONLFileSkipsMalformedLines(t *testing.T) {
 	}
 }
 
+func TestParseJSONLFileLastLineWithoutNewlineUsesFileSize(t *testing.T) {
+	content := `{"session_id":"s1","ts":1781597600,"text":"无换行结尾"}`
+	path := writeRawFile(t, "history-no-newline.jsonl", content)
+	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d: %#v", len(records), records)
+	}
+	if records[0].ByteEnd != int64(len(content)) {
+		t.Errorf("expected ByteEnd to equal file size %d, got %d", len(content), records[0].ByteEnd)
+	}
+}
+
+func TestParseJSONLFileCRLFOffsetsUseRawBytes(t *testing.T) {
+	firstLine := `{"session_id":"s1","ts":1781597600,"text":"第一条"}`
+	secondLine := `{"session_id":"s2","ts":1781597660,"text":"第二条"}`
+	path := writeRawFile(t, "history-crlf.jsonl", firstLine+"\r\n"+secondLine+"\r\n")
+	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records, got %d: %#v", len(records), records)
+	}
+	wantSecondStart := int64(len(firstLine) + len("\r\n"))
+	if records[1].ByteStart != wantSecondStart {
+		t.Errorf("expected second ByteStart %d, got %d", wantSecondStart, records[1].ByteStart)
+	}
+}
+
+func TestParseJSONLFileResumesFromStartByteAndLine(t *testing.T) {
+	firstLine := `{"session_id":"s1","ts":1781597600,"text":"已处理"}`
+	secondLine := `{"session_id":"s2","ts":1781597660,"text":"追加"}`
+	startByte := int64(len(firstLine) + 1)
+	path := writeRawFile(t, "history-resume.jsonl", firstLine+"\n"+secondLine+"\n")
+	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, startByte, 1)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 appended record, got %d: %#v", len(records), records)
+	}
+	if records[0].Text != "追加" {
+		t.Errorf("expected appended text, got %q", records[0].Text)
+	}
+	if records[0].LineStart != 2 || records[0].LineEnd != 2 {
+		t.Errorf("expected resumed line number 2, got %d-%d", records[0].LineStart, records[0].LineEnd)
+	}
+	if records[0].ByteStart != startByte {
+		t.Errorf("expected resumed ByteStart %d, got %d", startByte, records[0].ByteStart)
+	}
+	if !strings.Contains(records[0].RecordID, ":line:2") {
+		t.Errorf("expected resumed record id to contain line 2, got %q", records[0].RecordID)
+	}
+}
+
+func TestParseJSONLFileUnsupportedAgentTypeReturnsWarning(t *testing.T) {
+	path := writeJSONL(t, "unknown.jsonl", `{"text":"ignored"}`)
+	agent := candidate.AgentConfig{Name: "unknown", Type: "unknown-type"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no records, got %#v", records)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %#v", len(warnings), warnings)
+	}
+	if warnings[0].Code != "UNSUPPORTED_AGENT_TYPE" {
+		t.Errorf("expected UNSUPPORTED_AGENT_TYPE warning, got %q", warnings[0].Code)
+	}
+}
+
+func TestParseJSONLFileTruncatesMalformedJSONWarnings(t *testing.T) {
+	lines := make([]string, 25)
+	for i := range lines {
+		lines[i] = `{"session_id":"bad","text":`
+	}
+	path := writeJSONL(t, "many-bad-lines.jsonl", lines...)
+	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no records, got %#v", records)
+	}
+	if len(warnings) != 21 {
+		t.Fatalf("expected 20 parse warnings plus 1 truncated warning, got %d: %#v", len(warnings), warnings)
+	}
+	parseWarningCount := 0
+	for _, warning := range warnings {
+		if warning.Code == "JSONL_PARSE_FAILED" {
+			parseWarningCount++
+		}
+	}
+	if parseWarningCount != 20 {
+		t.Errorf("expected 20 JSONL_PARSE_FAILED warnings, got %d", parseWarningCount)
+	}
+	if warnings[len(warnings)-1].Code != "JSONL_PARSE_WARNINGS_TRUNCATED" {
+		t.Errorf("expected final warning to be JSONL_PARSE_WARNINGS_TRUNCATED, got %q", warnings[len(warnings)-1].Code)
+	}
+}
+
 func writeJSONL(t *testing.T, name string, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	content := strings.Join(lines, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write test JSONL: %v", err)
+	}
+	return path
+}
+
+func writeRawFile(t *testing.T, name string, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
 	}
 	return path
 }
