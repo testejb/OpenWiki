@@ -119,6 +119,50 @@ updated: 2026-06-15
 	}
 }
 
+func TestRebuildIndexUsesBidirectionalLinksForShardIndexes(t *testing.T) {
+	fs := wiki.NewMemFS()
+	root := "/test-wiki"
+	if err := wiki.Init(fs, root, map[string]interface{}{"wiki_root": root}); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if _, err := wiki.RebuildIndex(fs, root); err != nil {
+		t.Fatalf("RebuildIndex returned error: %v", err)
+	}
+
+	data, err := fs.ReadFile(filepath.Join(root, "wiki", "index.md"))
+	if err != nil {
+		t.Fatalf("read routing index failed: %v", err)
+	}
+	index := string(data)
+
+	for _, link := range []string{
+		"[[indexes/scopes]]",
+		"[[indexes/entities]]",
+		"[[indexes/concepts]]",
+		"[[indexes/tags]]",
+		"[[indexes/recent]]",
+		"[[indexes/hot]]",
+	} {
+		if !strings.Contains(index, link) {
+			t.Fatalf("expected rebuilt routing index to contain shard wiki link %s, got:\n%s", link, index)
+		}
+	}
+
+	for _, oldRef := range []string{
+		"`indexes/scopes.md`",
+		"`indexes/entities.md`",
+		"`indexes/concepts.md`",
+		"`indexes/tags.md`",
+		"`indexes/recent.md`",
+		"`indexes/hot.md`",
+	} {
+		if strings.Contains(index, oldRef) {
+			t.Fatalf("expected rebuilt routing index not to contain old shard path reference %s, got:\n%s", oldRef, index)
+		}
+	}
+}
+
 func TestCheckIndexReportsPageMissingFromTagsShardEvenIfRecentIndexed(t *testing.T) {
 	fs := wiki.NewMemFS()
 	root := "/test-wiki"
