@@ -84,6 +84,42 @@ func TestCommitAdvancesStateAndMarksPending(t *testing.T) {
 	}
 }
 
+func TestCommitRejectsStaleBacklogPending(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath,
+		`{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n"+
+			`{"session_id":"s2","ts":1781597660,"text":"第二条记录"}`+"\n"+
+			`{"session_id":"s3","ts":1781597720,"text":"第三条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+
+	initial, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("initial ScanCodeAgent returned error: %v", err)
+	}
+	if _, err := candidate.CommitCodeAgent(initial.PendingPath, "https://example.com/review-initial", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("initial CommitCodeAgent returned error: %v", err)
+	}
+
+	pending1, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Minute), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("first backlog ScanCodeAgent returned error: %v", err)
+	}
+	pending2, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Minute + time.Second), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("second backlog ScanCodeAgent returned error: %v", err)
+	}
+
+	if _, err := candidate.CommitCodeAgent(pending1.PendingPath, "https://example.com/review-1", snapshotPath, fixedCommitTime().Add(time.Minute)); err != nil {
+		t.Fatalf("commit first backlog pending returned error: %v", err)
+	}
+	if _, err := candidate.CommitCodeAgent(pending2.PendingPath, "https://example.com/review-2", snapshotPath, fixedCommitTime().Add(time.Minute+time.Second)); err == nil {
+		t.Fatalf("expected stale backlog pending commit to fail")
+	}
+}
+
 func TestCommitRejectsStalePending(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")

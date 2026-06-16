@@ -3,6 +3,7 @@ package candidate
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,10 +59,11 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 	var firstRunWarnings []Warning
 	records, firstRunWarnings = filterFirstRun(records, state, initialDays, now, fileUpdates)
 	warnings = append(warnings, firstRunWarnings...)
-	candidateRecords := append([]Record(nil), records...)
-	records = keepLatestRecords(records, maxRecords)
-	stateUpdates, stateAdvanceWarnings := stateUpdatesForPendingRecords(records, candidateRecords, fileUpdates, now)
-	warnings = append(warnings, stateAdvanceWarnings...)
+	baseBacklogHash := hashRecords(state.Backlog)
+	records = mergeRecords(state.Backlog, records)
+	var backlogUpdate []Record
+	records, backlogUpdate = keepLatestRecords(records, maxRecords)
+	stateUpdates := appendAllFileUpdates(fileUpdates)
 	baseState = baseStateForUpdates(baseState, stateUpdates)
 
 	pending := Pending{
@@ -81,10 +83,12 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 			InitialDays:      initialDays,
 			MaxRecordsPerRun: maxRecords,
 		},
-		Records:      records,
-		StateUpdates: stateUpdates,
-		BaseState:    baseState,
-		Warnings:     warnings,
+		Records:         records,
+		StateUpdates:    stateUpdates,
+		BaseState:       baseState,
+		BaseBacklogHash: baseBacklogHash,
+		BacklogUpdate:   backlogUpdate,
+		Warnings:        warnings,
 	}
 	pendingPath, err := nextPendingPath(cfg.PendingDir, now)
 	if err != nil {
@@ -145,9 +149,13 @@ func CommitCodeAgent(pendingPath, reviewDocURL, snapshotPath string, now time.Ti
 			return CommitResult{}, fmt.Errorf("stale pending %s: state for %s changed since scan", pendingPath, path)
 		}
 	}
+	if pending.BaseBacklogHash != "" && hashRecords(state.Backlog) != pending.BaseBacklogHash {
+		return CommitResult{}, fmt.Errorf("stale pending %s: backlog changed since scan", pendingPath)
+	}
 	for path, update := range pending.StateUpdates {
 		state.Files[path] = update
 	}
+	state.Backlog = append([]Record(nil), pending.BacklogUpdate...)
 	committedAt := now.UTC().Format(time.RFC3339)
 	state.UpdatedAt = committedAt
 	if err := SaveStateAtomic(pending.Config.StatePath, state); err != nil {
@@ -349,15 +357,16 @@ func fileMTimeWithinInitialWindow(path string, fileUpdates map[string]FileState,
 	return !info.ModTime().Before(cutoff)
 }
 
-func keepLatestRecords(records []Record, maxRecords int) []Record {
-	if maxRecords <= 0 || len(records) <= maxRecords {
-		return records
-	}
+func keepLatestRecords(records []Record, maxRecords int) ([]Record, []Record) {
 	ordered := append([]Record(nil), records...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return recordLess(ordered[i], ordered[j])
 	})
-	return append([]Record(nil), ordered[len(ordered)-maxRecords:]...)
+	if maxRecords <= 0 || len(ordered) <= maxRecords {
+		return ordered, nil
+	}
+	cutoff := len(ordered) - maxRecords
+	return append([]Record(nil), ordered[cutoff:]...), append([]Record(nil), ordered[:cutoff]...)
 }
 
 func recordLess(left, right Record) bool {
@@ -407,80 +416,57 @@ func nextPendingPath(pendingDir string, now time.Time) (string, error) {
 	return path, nil
 }
 
-func stateUpdatesForPendingRecords(records, candidateRecords []Record, fileUpdates map[string]FileState, now time.Time) (map[string]FileState, []Warning) {
-	updates := map[string]FileState{}
-	var warnings []Warning
-	included := map[string]bool{}
+func mergeRecords(backlog, records []Record) []Record {
+	if len(backlog) == 0 {
+		return append([]Record(nil), records...)
+	}
+	merged := make([]Record, 0, len(backlog)+len(records))
+	seen := map[string]bool{}
+	for _, record := range backlog {
+		key := recordKey(record)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, record)
+	}
 	for _, record := range records {
-		included[recordKey(record)] = true
-	}
-	candidatesByFile := map[string][]Record{}
-	for _, record := range candidateRecords {
-		candidatesByFile[record.SourceFile] = append(candidatesByFile[record.SourceFile], record)
-	}
-	for path, candidates := range candidatesByFile {
-		base, ok := fileUpdates[path]
-		if !ok {
+		key := recordKey(record)
+		if seen[key] {
 			continue
 		}
-		var lastContinuous *Record
-		includedAfterSkipped := false
-		for i := range candidates {
-			if included[recordKey(candidates[i])] {
-				if includedAfterSkipped {
-					continue
-				}
-				record := candidates[i]
-				lastContinuous = &record
-				continue
-			}
-			if lastContinuous != nil {
-				includedAfterSkipped = hasIncludedCandidate(candidates[i+1:], included)
-			} else {
-				includedAfterSkipped = hasIncludedCandidate(candidates[i+1:], included)
-			}
-			break
-		}
-		if lastContinuous == nil {
-			if hasIncludedCandidate(candidates, included) {
-				warnings = append(warnings, Warning{
-					Code:    "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE",
-					Message: "max_records_per_run skipped earlier records in this file; state advance was withheld to avoid permanently missing records",
-					Path:    path,
-				})
-			}
-			continue
-		}
-		update := base
-		update.ProcessedBytes = lastContinuous.ByteEnd
-		update.ProcessedLines = lastContinuous.LineEnd
-		update.LastScannedAt = now.UTC().Format(time.RFC3339)
-		if boundary, err := boundaryHash(path, lastContinuous.ByteEnd); err == nil {
-			update.BoundaryHash = boundary
-		}
+		seen[key] = true
+		merged = append(merged, record)
+	}
+	return merged
+}
+
+func appendAllFileUpdates(fileUpdates map[string]FileState) map[string]FileState {
+	updates := map[string]FileState{}
+	for path, update := range fileUpdates {
 		updates[path] = update
-		if includedAfterSkipped {
-			warnings = append(warnings, Warning{
-				Code:    "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE",
-				Message: "max_records_per_run skipped records after the continuous prefix in this file; state advanced only to the continuous prefix",
-				Path:    path,
-			})
-		}
 	}
-	return updates, warnings
+	return updates
+}
+
+func hashRecords(records []Record) string {
+	if len(records) == 0 {
+		return "empty"
+	}
+	ordered := append([]Record(nil), records...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return recordLess(ordered[i], ordered[j])
+	})
+	hash := sha256.New()
+	encoder := json.NewEncoder(hash)
+	for _, record := range ordered {
+		_ = encoder.Encode(record)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func recordKey(record Record) string {
 	return fmt.Sprintf("%s\x00%d\x00%d\x00%s", record.SourceFile, record.ByteStart, record.ByteEnd, record.RecordID)
-}
-
-func hasIncludedCandidate(candidates []Record, included map[string]bool) bool {
-	for _, record := range candidates {
-		if included[recordKey(record)] {
-			return true
-		}
-	}
-	return false
 }
 
 func baseStateForUpdates(baseState map[string]FileState, stateUpdates map[string]FileState) map[string]FileState {

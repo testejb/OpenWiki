@@ -37,6 +37,9 @@ func LoadState(path string) (State, error) {
 	if state.Files == nil {
 		state.Files = map[string]FileState{}
 	}
+	if state.Backlog == nil {
+		state.Backlog = []Record{}
+	}
 	return state, nil
 }
 
@@ -49,6 +52,9 @@ func SaveStateAtomic(path string, state State) error {
 	}
 	if state.Files == nil {
 		state.Files = map[string]FileState{}
+	}
+	if len(state.Backlog) == 0 {
+		state.Backlog = nil
 	}
 	return writeJSONAtomic(path, state)
 }
@@ -74,6 +80,9 @@ func LoadPending(path string) (Pending, error) {
 	if pending.BaseState == nil {
 		pending.BaseState = map[string]FileState{}
 	}
+	if pending.BacklogUpdate == nil {
+		pending.BacklogUpdate = []Record{}
+	}
 	return pending, nil
 }
 
@@ -89,6 +98,9 @@ func SavePendingAtomic(path string, pending Pending) error {
 	}
 	if pending.BaseState == nil {
 		pending.BaseState = map[string]FileState{}
+	}
+	if len(pending.BacklogUpdate) == 0 {
+		pending.BacklogUpdate = nil
 	}
 	return writeJSONAtomic(path, pending)
 }

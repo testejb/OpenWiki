@@ -178,6 +178,18 @@ func loadPendingForTest(t *testing.T, path string) candidate.Pending {
 	return pending
 }
 
+func assertPendingTexts(t *testing.T, pending candidate.Pending, want []string) {
+	t.Helper()
+	if len(pending.Records) != len(want) {
+		t.Fatalf("expected %d records, got %#v", len(want), pending.Records)
+	}
+	for i, text := range want {
+		if pending.Records[i].Text != text {
+			t.Fatalf("expected texts %#v, got %#v", want, pending.Records)
+		}
+	}
+}
+
 func loadStateForTest(t *testing.T, path string) candidate.State {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -213,7 +225,7 @@ func appendCandidateFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestScanMaxRecordsKeepsLatestButDoesNotAdvancePastSkippedEarlierRecords(t *testing.T) {
+func TestScanMaxRecordsKeepsLatestAndStoresSkippedEarlierRecordsInBacklog(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")
 	writeCandidateFile(t, historyPath,
@@ -233,11 +245,11 @@ func TestScanMaxRecordsKeepsLatestButDoesNotAdvancePastSkippedEarlierRecords(t *
 	if pending.Records[0].Text != "第二条记录" || pending.Records[1].Text != "第三条记录" {
 		t.Fatalf("expected latest two unprocessed records, got %#v", pending.Records)
 	}
-	if _, ok := pending.StateUpdates[historyPath]; ok {
-		t.Fatalf("expected state update to be withheld when maxRecords skipped an earlier record, got %#v", pending.StateUpdates[historyPath])
+	if _, ok := pending.StateUpdates[historyPath]; !ok {
+		t.Fatalf("expected state update to advance scanned file while skipped records are preserved in backlog")
 	}
-	if !hasWarningCode(pending.Warnings, "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE") {
-		t.Fatalf("expected MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE warning, got %#v", pending.Warnings)
+	if len(pending.BacklogUpdate) != 1 || pending.BacklogUpdate[0].Text != "第一条记录" {
+		t.Fatalf("expected skipped earlier record in backlog update, got %#v", pending.BacklogUpdate)
 	}
 
 	snapshotPath := filepath.Join(root, "snapshot.md")
@@ -246,8 +258,65 @@ func TestScanMaxRecordsKeepsLatestButDoesNotAdvancePastSkippedEarlierRecords(t *
 		t.Fatalf("CommitCodeAgent returned error: %v", err)
 	}
 	state := loadStateForTest(t, cfg.StatePath)
-	if _, ok := state.Files[historyPath]; ok {
-		t.Fatalf("expected committed state not to advance the file, got %#v", state.Files[historyPath])
+	info, err := os.Stat(historyPath)
+	if err != nil {
+		t.Fatalf("stat history: %v", err)
+	}
+	if state.Files[historyPath].ProcessedBytes != info.Size() || state.Files[historyPath].ProcessedLines != 3 {
+		t.Fatalf("expected committed state to advance file to EOF, got %#v", state.Files[historyPath])
+	}
+	if len(state.Backlog) != 1 || state.Backlog[0].Text != "第一条记录" {
+		t.Fatalf("expected committed state backlog to retain skipped record, got %#v", state.Backlog)
+	}
+}
+
+func TestScanMaxRecordsBacklogPreventsRepeatingLatestRecords(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath,
+		`{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n"+
+			`{"session_id":"s2","ts":1781597660,"text":"第二条记录"}`+"\n"+
+			`{"session_id":"s3","ts":1781597720,"text":"第三条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	firstPending := loadPendingForTest(t, first.PendingPath)
+	assertPendingTexts(t, firstPending, []string{"第二条记录", "第三条记录"})
+	if _, err := candidate.CommitCodeAgent(first.PendingPath, "https://example.com/review-1", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("first CommitCodeAgent returned error: %v", err)
+	}
+
+	second, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Minute), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	secondPending := loadPendingForTest(t, second.PendingPath)
+	assertPendingTexts(t, secondPending, []string{"第一条记录"})
+	if _, err := candidate.CommitCodeAgent(second.PendingPath, "https://example.com/review-2", snapshotPath, fixedCommitTime().Add(time.Minute)); err != nil {
+		t.Fatalf("second CommitCodeAgent returned error: %v", err)
+	}
+
+	third, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(2 * time.Minute), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("third ScanCodeAgent returned error: %v", err)
+	}
+	thirdPending := loadPendingForTest(t, third.PendingPath)
+	if third.Records.Total != 0 || len(thirdPending.Records) != 0 {
+		t.Fatalf("expected third scan to have no records, result=%#v pending=%#v", third.Records, thirdPending.Records)
+	}
+	state := loadStateForTest(t, cfg.StatePath)
+	info, err := os.Stat(historyPath)
+	if err != nil {
+		t.Fatalf("stat history: %v", err)
+	}
+	fileState := state.Files[historyPath]
+	if fileState.ProcessedBytes != info.Size() || fileState.ProcessedLines != 3 {
+		t.Fatalf("expected state tracked file at EOF, got %#v size=%d", fileState, info.Size())
 	}
 }
 
