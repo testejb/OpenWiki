@@ -128,12 +128,6 @@ func runCandidateCodeAgentCommit(stdout, stderr io.Writer, opts *GlobalOptions, 
 		return candidateCommitError(stdout, opts, fmt.Errorf("缺少 --snapshot"))
 	}
 
-	cfg, _, err := discoverConfig(opts)
-	if err != nil {
-		return candidateCommitError(stdout, opts, err)
-	}
-	_ = candidate.ResolveCodeAgentConfig(cfg)
-
 	commitResult, err := candidate.CommitCodeAgent(*pendingPath, *reviewDocURL, *snapshotPath, time.Time{})
 	if err != nil {
 		return candidateCommitError(stdout, opts, err)
