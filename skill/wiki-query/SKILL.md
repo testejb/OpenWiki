@@ -4,24 +4,30 @@ description: Use when asking a question against a personal wiki built with wiki-
 ---
 # Wiki Query
 
-Ask a question. Read the wiki. Synthesize with citations. Offer to file the answer back.
+Ask a question. Read the wiki through the Routing Index and Shard Indexes. Synthesize with citations. Offer to file the answer back.
+
+## Runtime Contract
+
+- Use `openwiki.toml` as the runtime contract.
+- `wiki/index.md` is the lightweight Routing Index.
+- `wiki/indexes/` contains Shard Indexes.
+- Read local wiki evidence before answering from general knowledge.
+- Append query usage to `wiki/indexes/query-usage.jsonl` after each query.
 
 ## Pre-condition
 
-Use this discovery order for the configuration directory:
+Discover and read `openwiki.toml`:
 
-1. If the user explicitly provides a `config-dir`, use it.
-2. Otherwise, check `~/.openwiki/openwiki.toml`. If it exists and is valid, use it as the default wiki config.
-3. If the default config is not found or invalid, search upward from the current working directory for `openwiki.toml`.
-4. If `openwiki.toml` is still not found, ask the user for an absolute config-dir or tell them to run `wiki-init` first.
+1. If the user explicitly provides a config path or project directory, use that `openwiki.toml`.
+2. Otherwise, search upward from the current working directory for `openwiki.toml`.
+3. If not found, ask the user for the project path or tell them to run `wiki-init` first.
 
-If the default wiki config at `~/.openwiki` is used, tell the user you are using the default wiki config.
-
-Read `openwiki.toml` to resolve the absolute `wiki_root` plus:
+Resolve `wiki_root` from `openwiki.toml`, then locate:
 
 - `wiki/index.md`
 - `wiki/log.md`
 - `wiki/pages/`
+- `wiki/indexes/`
 - `entities/`
 - `concepts/`
 
@@ -29,78 +35,67 @@ Do not depend on legacy agent-specific files or compatibility directories.
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
-## Process
+## CLI Index Command Guardrail
 
-### 1. Read `wiki/index.md` first
-
-Use the CLI to scan the full index:
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
 
 ```bash
-openwiki page list --json
+openwiki --help | grep -q "index"
 ```
 
-Identify which pages are likely relevant. Do not answer from general knowledge first.
-
-同时扫描 category_3（适用范围）区域。当用户问题涉及特定代码仓库或领域时，优先检索该 `scope_code` 下的页面。
-
-### 2. Read relevant pages
-
-Use the CLI to read pages (supports cross-directory search across `wiki/pages/`, `entities/`, `concepts/`):
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
 
 ```bash
-openwiki page get <slug> --json
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
 ```
 
-Read the identified pages in full. Follow one level of `[[slug]]` links if they point to pages that seem relevant to the question.
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
 
-### 3. Outside supplement (if needed)
+## Query Flow
 
-**铁律：外部搜索必须并行执行。** 当本地 wiki 无法满足查询时，以下三个渠道的搜索必须在同一轮 tool call 中同时发起，禁止串行逐个执行。违反此规则属于 Common Mistake。
+1. Read `openwiki.toml` and resolve `wiki_root`.
+2. Read `wiki/index.md` as the lightweight Routing Index.
+3. Use the routing dimensions to choose shard indexes:
+   - Scope clue → `wiki/indexes/scopes.md`
+   - Entity clue → `wiki/indexes/entities.md`
+   - Concept clue → `wiki/indexes/concepts.md`
+   - Tag clue → `wiki/indexes/tags.md`
+   - Recent/current clue → `wiki/indexes/recent.md`
+   - Unclear query → `wiki/indexes/hot.md` and `wiki/indexes/recent.md`
+4. Read 1-3 relevant shard indexes.
+5. Select candidate pages.
+6. Read candidate pages in full from `wiki/pages/`, `entities/`, or `concepts/`.
+7. Follow one level of `[[slug]]` links if they are clearly relevant.
+8. Answer with `[[slug]]` citations.
+9. Append a JSON line to `wiki/indexes/query-usage.jsonl`.
 
-同时，Step 2 的 grep/页面读取与 Step 3 的外部搜索之间没有依赖关系——一旦 Step 1 确认 wiki 中无精确匹配，即可将 grep + 外部搜索全部并行发出。
+Append query usage as one JSON object per line:
 
-**并行启动以下搜索（必须在同一轮 tool call 中完成）：**
-
-| 渠道 | 工具 | 命令 / 用法 |
-|------|------|-------------|
-| Web 搜索 | `WebSearch` 工具 | 直接调用，使用用户原始查询中的核心术语。可同时发起多个不同关键词的搜索 |
-| ByteTech 内部文章 | `RunCommand` | `python3 scripts/bytetech_api.py search "<关键词>"`（在 bytetech skill 目录下执行） |
-| 飞书文档 | `RunCommand` | `lark-cli docs +search --as user --query "<关键词>"` |
-
-三个搜索的关键词应保持一致，使用用户原始查询中的核心术语。
-
-#### lark-cli 文档搜索详细用法
-
-飞书文档搜索用于查找字节跳动内部知识库中的规范文档：
-
-```bash
-# 搜索飞书云文档（必须使用 --query flag，不支持位置参数）
-lark-cli docs +search --as user --query "<关键词>"
+```json
+{"time":"2026-06-15T15:30:00+08:00","query":"用户问题","matched_indexes":["indexes/tags.md"],"read_pages":["slug"],"cited_pages":["slug"],"intent_tags":["tag"]}
 ```
 
-搜索结果返回文档 token 和标题，可进一步用 `lark-cli docs +fetch --as user --doc "<token>"` 获取正文。
+Use the actual timestamp, original user query, matched shard index paths, pages read, pages cited, and inferred intent tags. Record usage even for no-hit or partial-index-failure cases when possible; use empty arrays plus optional `status` and `notes` fields when needed, for example `"status":"no_hit"` or `"status":"partial_index_failure"`. If appending `wiki/indexes/query-usage.jsonl` fails, warn the user but do not fail the answer. Still append a `query` record to `wiki/log.md` when possible.
 
-#### agent-browser（仅当需要抓取特定 URL 时使用）
+## Outside supplement if needed
 
-当搜索结果返回了需要深入阅读的特定网页时，使用 `agent-browser` 抓取内容。优先使用权威站点：
+When local wiki evidence is insufficient, supplement with external sources after the Routing Index and selected shard indexes have been checked.
 
-- **General concepts**: en.wikipedia.org / zh.wikipedia.org
-- **Tech/Programming**: docs.python.org, developer.mozilla.org, arxiv.org, github.com
-- **AI/ML Papers**: arxiv.org, paperswithcode.com, huggingface.co
-- **News/Current Events**: reuters.com, bbc.com, theguardian.com
-- **Academic**: scholar.google.com, semanticscholar.org
+For ByteDance-internal or organization-specific questions, search relevant internal documentation when available. For public facts, prefer official or authoritative sources. Cite URLs for external sources and clearly separate them from local wiki citations.
 
-### 4. Synthesize the answer
+## Synthesize the answer
 
 Write a response that:
 
-- is grounded in the wiki pages you read
-- cites inline using `[[slug]]` for local pages and URLs for web sources
-- notes agreements and disagreements between pages
-- flags gaps like "The wiki has no page on X"
-- suggests follow-up sources to ingest or questions to investigate
+- is grounded in the wiki pages you read.
+- cites inline using `[[slug]]` for local pages and URLs for web sources.
+- notes agreements and disagreements between pages.
+- flags gaps such as "The wiki has no page on X".
+- suggests follow-up sources to ingest or questions to investigate.
 
-### 5. Always offer to save
+## Always offer to save
 
 After answering, say:
 
@@ -108,18 +103,19 @@ After answering, say:
 
 If yes:
 
-- write the page with frontmatter: `tags: [query, analysis]`, `sources: <number>`, `updated: <today>`
-- update `wiki/index.md` under **Concepts Pages**
-- append a `query` record to `wiki/log.md`
+- write the concept page directly as Markdown with frontmatter such as `tags: [query, analysis]`, source count, and `updated: <today>`.
+- update `wiki/indexes/concepts.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md`.
+- keep `wiki/index.md` lightweight as the Routing Index.
+- append a `query` record to `wiki/log.md`.
 
 If no:
 
-- still append a `query` record to `wiki/log.md` noting the pages read and whether web verification was used
+- still append a `query` record to `wiki/log.md` noting the pages read and whether outside verification was used. If the query produced no local hits, record that fact in both `wiki/indexes/query-usage.jsonl` when possible and `wiki/log.md` when possible.
 
 ## Common Mistakes
 
-- **Answering from memory** — always read the wiki pages first
-- **Skipping the save offer** — always offer
-- **No citations** — every factual claim should trace back to a `[[slug]]` or URL
-- **串行执行外部搜索** — Step 3 的 Web 搜索、ByteTech 搜索、lark-cli 搜索必须在同一轮 tool call 中并行发起，禁止逐个串行调用
-- **跳过 lark-cli 搜索** — 当查询涉及字节跳动内部规范/文档时，lark-cli 搜索是必选项，不可省略
+- **Answering from memory** — always read local wiki files first.
+- **Reading every page by default** — route through `wiki/index.md` and 1-3 shard indexes instead.
+- **Skipping query usage** — always append `wiki/indexes/query-usage.jsonl`.
+- **Skipping the save offer** — always offer.
+- **No citations** — every factual claim should trace back to a `[[slug]]` or URL.

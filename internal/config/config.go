@@ -3,14 +3,15 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
-	WikiRoot string        `toml:"wiki_root"`
-	Wiki     WikiConfig    `toml:"wiki"`
-	Remote   RemoteConfig  `toml:"remote"`
+	WikiRoot string       `toml:"wiki_root"`
+	Wiki     WikiConfig   `toml:"wiki"`
+	Remote   RemoteConfig `toml:"remote"`
 }
 
 type WikiConfig struct {
@@ -43,11 +44,24 @@ func Load(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("解析 TOML 配置失败: %w", err)
 	}
+	if cfg.WikiRoot != "" && !filepath.IsAbs(cfg.WikiRoot) {
+		cfg.WikiRoot = filepath.Clean(filepath.Join(filepath.Dir(path), cfg.WikiRoot))
+	}
 
 	return &cfg, nil
 }
 
 func Set(path, key, value string) (oldVal, newVal string, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	var fileCfg Config
+	if err := toml.Unmarshal(data, &fileCfg); err != nil {
+		return "", "", fmt.Errorf("解析 TOML 配置失败: %w", err)
+	}
+
 	cfg, err := Load(path)
 	if err != nil {
 		return "", "", err
@@ -60,6 +74,9 @@ func Set(path, key, value string) (oldVal, newVal string, err error) {
 
 	if err := setFieldValue(cfg, key, value); err != nil {
 		return "", "", err
+	}
+	if key != "wiki_root" {
+		cfg.WikiRoot = fileCfg.WikiRoot
 	}
 
 	f, err := os.Create(path)

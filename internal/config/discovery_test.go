@@ -51,7 +51,7 @@ func TestDiscoverEnvVar(t *testing.T) {
 
 	d := &config.DefaultDiscoverer{
 		HomeDir: "/nonexistent",
-		Getenv:  func(key string) string {
+		Getenv: func(key string) string {
 			if key == "OPENWIKI_CONFIG" {
 				return tomlPath
 			}

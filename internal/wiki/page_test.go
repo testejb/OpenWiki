@@ -69,11 +69,21 @@ func TestListPages(t *testing.T) {
 		t.Errorf("expected 2 pages, got %d", len(pages))
 	}
 
-	if pages[0].Slug != "test-page" {
-		t.Errorf("expected first slug=test-page, got %s", pages[0].Slug)
+	pageMap := make(map[string]wiki.PageMeta)
+	for _, p := range pages {
+		pageMap[p.Slug] = p
 	}
-	if pages[0].Title != "测试页面" {
-		t.Errorf("expected title=测试页面, got %s", pages[0].Title)
+
+	if p, ok := pageMap["test-page"]; !ok {
+		t.Error("expected test-page in results")
+	} else if p.Title != "测试页面" {
+		t.Errorf("expected title=测试页面, got %s", p.Title)
+	}
+
+	if p, ok := pageMap["another-page"]; !ok {
+		t.Error("expected another-page in results")
+	} else if p.Title != "另一个页面" {
+		t.Errorf("expected title=另一个页面, got %s", p.Title)
 	}
 }
 
@@ -111,7 +121,6 @@ func TestGetPageNotFound(t *testing.T) {
 func TestGetPageFromEntitiesDir(t *testing.T) {
 	fs, root := setupTestWiki(t)
 
-	// 在 entities/ 目录下创建页面
 	entityContent := `---
 title: Andrej Karpathy
 entity_type: person
@@ -128,19 +137,6 @@ AI 研究员。
 	fs.MkdirAll(filepath.Join(root, "entities"), 0755)
 	fs.WriteFile(filepath.Join(root, "entities", "andrej-karpathy.md"), []byte(entityContent), 0644)
 
-	// 更新 index.md 添加 entity 条目
-	indexContent := `# Wiki 索引
-
-## 资料页
-
-| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |
-|------|------|------|------|----------|----------|
-| test-page | 测试页面 | page | test, demo | repo/test-repo | 2026-06-01 |
-| another-page | 另一个页面 | page | demo | domain/test-domain | 2026-05-30 |
-| andrej-karpathy | Andrej Karpathy | entity | entity, person | wisdom/ai-research | 2026-06-06 |
-`
-	fs.WriteFile(filepath.Join(root, "wiki", "index.md"), []byte(indexContent), 0644)
-
 	page, err := wiki.GetPage(fs, root, "andrej-karpathy")
 	if err != nil {
 		t.Fatalf("GetPage from entities/ failed: %v", err)
@@ -153,31 +149,15 @@ AI 研究员。
 func TestGetPagePriorityPagesFirst(t *testing.T) {
 	fs, root := setupTestWiki(t)
 
-	// 在 wiki/pages/ 和 entities/ 同时创建同名页面
 	fs.MkdirAll(filepath.Join(root, "entities"), 0755)
 	fs.WriteFile(filepath.Join(root, "entities", "duplicate.md"), []byte("entity version"), 0644)
 
-	// 更新 index.md
-	indexContent := `# Wiki 索引
-
-## 资料页
-
-| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |
-|------|------|------|------|----------|----------|
-| test-page | 测试页面 | page | test, demo | repo/test-repo | 2026-06-01 |
-| another-page | 另一个页面 | page | demo | domain/test-domain | 2026-05-30 |
-| duplicate | 重复页面 | entity | test | repo/test | 2026-06-06 |
-`
-	fs.WriteFile(filepath.Join(root, "wiki", "index.md"), []byte(indexContent), 0644)
-
-	// 同时在 pages 下创建
 	fs.WriteFile(filepath.Join(root, "wiki", "pages", "duplicate.md"), []byte("page version"), 0644)
 
 	page, err := wiki.GetPage(fs, root, "duplicate")
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
-	// 应该返回 wiki/pages/ 下的（优先级最高）
 	if !strings.Contains(page.Path, "wiki/pages") {
 		t.Errorf("expected page from wiki/pages/, got path: %s", page.Path)
 	}
@@ -224,16 +204,83 @@ func TestCreatePage(t *testing.T) {
 		t.Errorf("expected slug=new-page, got %s", created.Slug)
 	}
 
-	pages, _ := wiki.ListPages(fs, root)
-	found := false
-	for _, p := range pages {
-		if p.Slug == "new-page" {
-			found = true
-			break
-		}
+	// 验证文件存在
+	pagePath := filepath.Join(root, "wiki", "pages", "new-page.md")
+	if _, err := fs.Stat(pagePath); err != nil {
+		t.Error("new-page file not found after create")
 	}
-	if !found {
-		t.Error("new-page not found in index after create")
+}
+
+func TestPageCRUDMaintainsRoutingIndexAndShardIndexes(t *testing.T) {
+	fs := wiki.NewMemFS()
+	root := "/routing-wiki"
+	if err := wiki.Init(fs, root, map[string]interface{}{"wiki_root": root}); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	page := &wiki.Page{
+		Slug: "new-page",
+		Frontmatter: map[string]interface{}{
+			"title":       "新页面",
+			"tags":        []string{"new", "routing"},
+			"scope_level": "repo",
+			"scope_code":  "openwiki",
+			"updated":     "2026-06-15",
+		},
+		Body: "# 新页面\n\n这是新页面的内容。",
+	}
+
+	if err := wiki.CreatePage(fs, root, page); err != nil {
+		t.Fatalf("CreatePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 1)
+
+	page.Frontmatter["title"] = "更新后的新页面"
+	page.Frontmatter["updated"] = "2026-06-16"
+	page.Body = "# 更新后的新页面\n\n内容已更新。"
+	if err := wiki.UpdatePage(fs, root, page); err != nil {
+		t.Fatalf("UpdatePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 1)
+
+	if err := wiki.DeletePage(fs, root, "new-page"); err != nil {
+		t.Fatalf("DeletePage failed: %v", err)
+	}
+	assertRoutingIndexHasNoPageRow(t, fs, root, "new-page")
+	assertIndexOK(t, fs, root, 0)
+}
+
+func assertRoutingIndexHasNoPageRow(t *testing.T, fs wiki.FS, root, slug string) {
+	t.Helper()
+	data, err := fs.ReadFile(filepath.Join(root, "wiki", "index.md"))
+	if err != nil {
+		t.Fatalf("read routing index failed: %v", err)
+	}
+	index := string(data)
+	if !strings.Contains(index, "## 检索路由") {
+		t.Fatalf("expected routing index to keep 检索路由, got:\n%s", index)
+	}
+	if strings.Contains(index, "| "+slug+" |") {
+		t.Fatalf("routing index should not contain old-style page row for %s, got:\n%s", slug, index)
+	}
+}
+
+func assertIndexOK(t *testing.T, fs wiki.FS, root string, wantPageCount int) {
+	t.Helper()
+	result, err := wiki.CheckIndex(fs, root)
+	if err != nil {
+		t.Fatalf("CheckIndex returned error: %v", err)
+	}
+	if result.PageCount != wantPageCount {
+		t.Fatalf("expected page count %d, got %#v", wantPageCount, result)
+	}
+	if result.Health != "ok" {
+		t.Fatalf("expected index health ok, got %#v", result)
+	}
+	if len(result.MissingFiles) > 0 || len(result.UnindexedPages) > 0 {
+		t.Fatalf("expected no index warnings, got %#v", result)
 	}
 }
 
@@ -573,5 +620,70 @@ func TestDeletePageNotFound(t *testing.T) {
 	err := wiki.DeletePage(fs, root, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent page, got nil")
+	}
+}
+
+func TestListPagesEmptyDir(t *testing.T) {
+	fs := wiki.NewMemFS()
+	root := "/empty-wiki"
+
+	pages, err := wiki.ListPages(fs, root)
+	if err != nil {
+		t.Fatalf("ListPages should not error on empty dir: %v", err)
+	}
+	if len(pages) != 0 {
+		t.Errorf("expected 0 pages, got %d", len(pages))
+	}
+}
+
+func TestListPagesSkipsBadFiles(t *testing.T) {
+	fs := wiki.NewMemFS()
+	root := "/test-wiki"
+
+	fs.MkdirAll(filepath.Join(root, "wiki", "pages"), 0755)
+
+	goodContent := `---
+title: 正常页面
+tags: [test]
+scope_level: repo
+scope_code: test
+updated: 2026-06-06
+---
+
+内容
+`
+	fs.WriteFile(filepath.Join(root, "wiki", "pages", "good.md"), []byte(goodContent), 0644)
+
+	badContent := `---
+this is not valid yaml
+no colons here
+---
+`
+	fs.WriteFile(filepath.Join(root, "wiki", "pages", "bad.md"), []byte(badContent), 0644)
+
+	pages, err := wiki.ListPages(fs, root)
+	if err != nil {
+		t.Fatalf("ListPages failed: %v", err)
+	}
+
+	if len(pages) != 2 {
+		t.Errorf("expected 2 pages, got %d", len(pages))
+	}
+
+	foundGood := false
+	foundBad := false
+	for _, p := range pages {
+		if p.Slug == "good" && p.Title == "正常页面" {
+			foundGood = true
+		}
+		if p.Slug == "bad" {
+			foundBad = true
+		}
+	}
+	if !foundGood {
+		t.Error("good page not found")
+	}
+	if !foundBad {
+		t.Error("bad page not found (still listed with empty metadata)")
 	}
 }

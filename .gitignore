@@ -12,3 +12,5 @@
 
 # Logs (optional — remove this line if you want to track log history)
 # log.md
+
+.worktrees/

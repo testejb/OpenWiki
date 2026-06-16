@@ -60,6 +60,24 @@ def parse_toml(filepath):
     return result
 
 
+def iter_page_files(wiki_root):
+    dirs = [
+        os.path.join(wiki_root, "wiki", "pages"),
+        os.path.join(wiki_root, "entities"),
+        os.path.join(wiki_root, "concepts"),
+    ]
+    for directory in dirs:
+        if not os.path.isdir(directory):
+            continue
+        for fname in os.listdir(directory):
+            if fname.endswith(".md"):
+                yield os.path.join(directory, fname)
+
+
+def collect_slugs(wiki_root):
+    return {os.path.splitext(os.path.basename(path))[0] for path in iter_page_files(wiki_root)}
+
+
 def check_wiki_config(wiki_root):
     config_path = os.path.join(wiki_root, "openwiki.toml")
     if not os.path.exists(config_path):
@@ -79,31 +97,31 @@ def check_wiki_config(wiki_root):
     return {"name": "wiki-config-fields", "status": "pass", "message": "openwiki.toml 必填字段完整"}
 
 
-def check_index_table(wiki_root):
+def check_routing_index(wiki_root):
     index_path = os.path.join(wiki_root, "wiki", "index.md")
     if not os.path.exists(index_path):
-        return {"name": "index-table-format", "status": "fail", "message": f"wiki/index.md 不存在于 {wiki_root}"}
+        return {"name": "routing-index", "status": "fail", "message": f"wiki/index.md 不存在于 {wiki_root}"}
 
     with open(index_path) as f:
         content = f.read()
 
-    if "## Wiki 页面" not in content:
-        return {"name": "index-table-format", "status": "fail", "message": "index.md 缺少 '## Wiki 页面' 章节"}
+    if "## 检索路由" not in content and "Routing Index" not in content:
+        return {"name": "routing-index", "status": "fail", "message": "wiki/index.md 不是 Routing Index（缺少 '## 检索路由' 或 'Routing Index' 标记）"}
 
-    lines = content.split("\n")
-    has_header = False
-    has_separator = False
-    for i, line in enumerate(lines):
-        if "| 页面 |" in line and "摘要" in line and "标签" in line:
-            has_header = True
-        if has_header and "|---" in line:
-            has_separator = True
-            break
+    return {"name": "routing-index", "status": "pass", "message": "wiki/index.md 是轻量 Routing Index"}
 
-    if not has_header or not has_separator:
-        return {"name": "index-table-format", "status": "fail", "message": "index.md 表格格式不正确（缺少表头或分隔行）"}
 
-    return {"name": "index-table-format", "status": "pass", "message": "index.md 表格格式正确"}
+def check_layered_indexes(wiki_root):
+    indexes_dir = os.path.join(wiki_root, "wiki", "indexes")
+    required = ["scopes.md", "entities.md", "concepts.md", "tags.md", "recent.md", "hot.md", "query-usage.jsonl"]
+    if not os.path.isdir(indexes_dir):
+        return {"name": "layered-indexes", "status": "fail", "message": f"wiki/indexes/ 目录不存在于 {wiki_root}"}
+
+    missing = [name for name in required if not os.path.exists(os.path.join(indexes_dir, name))]
+    if missing:
+        return {"name": "layered-indexes", "status": "fail", "message": f"wiki/indexes/ 缺少必需分片索引: {', '.join(missing)}"}
+
+    return {"name": "layered-indexes", "status": "pass", "message": "wiki/indexes/ 必需分片索引完整"}
 
 
 def check_cross_references(wiki_root):
@@ -111,24 +129,18 @@ def check_cross_references(wiki_root):
     if not os.path.isdir(pages_dir):
         return {"name": "cross-references", "status": "fail", "message": f"wiki/pages/ 目录不存在于 {wiki_root}"}
 
-    existing_slugs = set()
-    for fname in os.listdir(pages_dir):
-        if fname.endswith(".md"):
-            existing_slugs.add(fname[:-3])
-
+    existing_slugs = collect_slugs(wiki_root)
     broken_links = []
     ref_pattern = re.compile(r"\[\[([^\]]+)\]\]")
 
-    for fname in os.listdir(pages_dir):
-        if not fname.endswith(".md"):
-            continue
-        filepath = os.path.join(pages_dir, fname)
+    for filepath in iter_page_files(wiki_root):
+        slug = os.path.splitext(os.path.basename(filepath))[0]
         with open(filepath) as f:
             content = f.read()
         for match in ref_pattern.finditer(content):
             target = match.group(1)
             if target not in existing_slugs:
-                broken_links.append(f"{fname[:-3]} -> [[{target}]]")
+                broken_links.append(f"{slug} -> [[{target}]]")
 
     if broken_links:
         return {"name": "cross-references", "status": "fail", "message": f"发现 {len(broken_links)} 个断链: {', '.join(broken_links[:5])}"}
@@ -145,19 +157,21 @@ def check_page_frontmatter(wiki_root):
     valid_scope_levels = {"repo", "domain", "company", "industry", "wisdom"}
     missing_pages = []
 
-    for fname in os.listdir(pages_dir):
-        if not fname.endswith(".md"):
-            continue
-        filepath = os.path.join(pages_dir, fname)
+    for filepath in iter_page_files(wiki_root):
         fm = parse_frontmatter(filepath)
-        slug = fname[:-3]
+        slug = os.path.splitext(os.path.basename(filepath))[0]
+        rel = os.path.relpath(filepath, wiki_root)
 
-        missing = [f for f in required_fields if f not in fm]
+        required = ["title", "updated"]
+        if rel.startswith(os.path.join("wiki", "pages") + os.sep):
+            required = required_fields
+
+        missing = [f for f in required if f not in fm]
         if missing:
             missing_pages.append(f"{slug}: 缺少 {', '.join(missing)}")
             continue
 
-        if fm.get("scope_level") not in valid_scope_levels:
+        if "scope_level" in fm and fm.get("scope_level") not in valid_scope_levels:
             missing_pages.append(f"{slug}: scope_level 值 '{fm['scope_level']}' 无效")
 
         if fm.get("scope_level") == "wisdom" and fm.get("scope_code") != "wisdom":
@@ -181,7 +195,8 @@ def main():
 
     checks = [
         check_wiki_config(wiki_root),
-        check_index_table(wiki_root),
+        check_routing_index(wiki_root),
+        check_layered_indexes(wiki_root),
         check_cross_references(wiki_root),
         check_page_frontmatter(wiki_root),
     ]

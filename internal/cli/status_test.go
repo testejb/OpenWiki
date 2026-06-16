@@ -13,10 +13,20 @@ import (
 
 func setupTestWiki(t *testing.T, dir string) string {
 	t.Helper()
-	wikiRoot := filepath.Join(dir, "test-wiki")
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd failed: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	wikiRoot := "test-wiki"
 
 	var stdout, stderr bytes.Buffer
-	err := cli.RunWithIO([]string{
+	err = cli.RunWithIO([]string{
 		"init", wikiRoot,
 		"--non-interactive", "--json",
 	}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
@@ -24,9 +34,19 @@ func setupTestWiki(t *testing.T, dir string) string {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	tomlPath := filepath.Join(wikiRoot, "openwiki.toml")
+	wikiRootAbs := filepath.Join(dir, "test-wiki")
+	tomlPath := filepath.Join(wikiRootAbs, "openwiki.toml")
+	configContent := `wiki_root = "."
 
-	pageDir := filepath.Join(wikiRoot, "wiki", "pages")
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+`
+	if err := os.WriteFile(tomlPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	pageDir := filepath.Join(wikiRootAbs, "wiki", "pages")
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
 		t.Fatalf("mkdir pages failed: %v", err)
 	}
@@ -48,20 +68,6 @@ func setupTestWiki(t *testing.T, dir string) string {
 		if err := os.WriteFile(pagePath, []byte(p.content), 0644); err != nil {
 			t.Fatalf("write page %s failed: %v", p.slug, err)
 		}
-	}
-
-	indexContent := `# Wiki 索引
-
-## 资料页
-
-| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |
-|------|------|------|------|----------|----------|
-| page-a | 页面A | page | test, demo | industry/test | 2026-06-01 |
-| page-b | 页面B | page | guide | repo/my-repo | 2026-06-02 |
-`
-	indexPath := filepath.Join(wikiRoot, "wiki", "index.md")
-	if err := os.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
-		t.Fatalf("write index.md failed: %v", err)
 	}
 
 	return tomlPath
@@ -145,5 +151,47 @@ func TestStatusVerbose(t *testing.T) {
 	}
 	if len(details) != 2 {
 		t.Errorf("expected 2 page details, got %d", len(details))
+	}
+}
+
+func TestStatusIncludesIndexHealth(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := setupTestWiki(t, dir)
+
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"--config", tomlPath, "status", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp output.Response
+	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success=true, got error: %v", resp.Error)
+	}
+
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	index, ok := data["index"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data.index to be a map")
+	}
+	health, ok := index["health"].(string)
+	if !ok {
+		t.Fatalf("expected data.index.health to be a string, got %#v", index["health"])
+	}
+	if health != "warning" {
+		t.Fatalf("expected data.index.health=warning, got %q", health)
+	}
+	unindexedPages, ok := index["unindexed_pages"].([]interface{})
+	if !ok {
+		t.Fatalf("expected data.index.unindexed_pages to be an array, got %#v", index["unindexed_pages"])
+	}
+	if len(unindexedPages) == 0 {
+		t.Fatal("expected data.index.unindexed_pages to be non-empty")
 	}
 }

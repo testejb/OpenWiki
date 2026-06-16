@@ -6,22 +6,27 @@ description: Use when auditing a wiki for health issues — contradictions betwe
 
 Audit the wiki. Produce a categorized report. Offer concrete fixes. Log the operation.
 
+## Runtime Contract
+
+- Use `openwiki.toml` as the runtime contract.
+- `wiki/index.md` is the lightweight Routing Index.
+- `wiki/indexes/` contains Shard Indexes.
+- Audit Markdown files directly under the resolved `wiki_root`.
+
 ## Pre-condition
 
-Use this discovery order for the configuration directory:
+Discover and read `openwiki.toml`:
 
-1. If the user explicitly provides a `config-dir`, use it.
-2. Otherwise, check `~/.openwiki/openwiki.toml`. If it exists and is valid, use it as the default wiki config.
-3. If the default config is not found or invalid, search upward from the current working directory for `openwiki.toml`.
-4. If `openwiki.toml` is still not found, ask the user for an absolute config-dir or tell them to run `wiki-init` first.
+1. If the user explicitly provides a config path or project directory, use that `openwiki.toml`.
+2. Otherwise, search upward from the current working directory for `openwiki.toml`.
+3. If not found, ask the user for the project path or tell them to run `wiki-init` first.
 
-If the default wiki config at `~/.openwiki` is used, tell the user you are using the default wiki config.
-
-Read `openwiki.toml` to resolve the absolute `wiki_root` plus:
+Resolve `wiki_root` from `openwiki.toml`, then locate:
 
 - `wiki/index.md`
 - `wiki/log.md`
 - `wiki/pages/`
+- `wiki/indexes/`
 - `entities/`
 - `concepts/`
 - `primary_language`
@@ -31,52 +36,101 @@ Do not depend on legacy agent-specific files or compatibility directories.
 
 > **日期占位符说明：** 本文档中的 `<today>` 在执行时必须替换为实际当前日期，格式为 YYYY-MM-DD（如 `2026-05-26`）。
 
+
+## CLI Index Command Guardrail
+
+Before running `openwiki index check` or `openwiki index rebuild`, verify that the selected CLI supports index commands:
+
+```bash
+openwiki --help | grep -q "index"
+```
+
+If the global `openwiki` CLI is outdated or does not list `index`, use the repository-built CLI from the repository root instead:
+
+```bash
+go run ./cmd/openwiki --help | grep -q "index"
+go run ./cmd/openwiki index check
+go run ./cmd/openwiki index rebuild
+```
+
+If neither command exposes `index`, report that the OpenWiki CLI version is too old and do not imply that index commands are available.
+
 ## Process
 
 ### 1. Build the page inventory
 
-Use the CLI to list all pages:
+Read `wiki/index.md`, shard indexes under `wiki/indexes/`, and all Markdown files in:
+
+- `wiki/pages/`
+- `entities/`
+- `concepts/`
+
+Build a map of:
+
+- all existing slugs and file paths.
+- all `[[slug]]` references.
+- all frontmatter fields.
+- all tags, scopes, page types, summaries, and updated dates.
+- all entries found in shard indexes.
+
+### 2. Run content health checks
+
+Apply the repository lint rules where available. Categorize findings by severity:
+
+**Red Errors**: broken links, missing required frontmatter, unreadable page files.
+
+**Yellow Warnings**: orphan pages, contradictions, stale claims, language/style mismatches, missing bilingual terms, missing or invalid scope fields, invalid entity type, weak summaries.
+
+**Blue Info**: missing concept pages, missing cross-references, hardcoded date placeholders, coverage gaps.
+
+Language-specific rules should follow `primary_language` and `secondary_language` in `openwiki.toml`.
+
+### 2.1 Layered Index Checks
+
+Audit:
+
+- `wiki/index.md` exists and is a Routing Index.
+- `wiki/index.md` does not contain full all-page tables.
+- Required shard indexes exist under `wiki/indexes/`.
+- Every page in `wiki/pages/`, `entities/`, and `concepts/` appears in at least one appropriate shard index.
+- Shard indexes do not link to missing pages.
+- `wiki/indexes/hot.md` is not stale relative to `wiki/indexes/query-usage.jsonl`.
+
+Required shard indexes:
+
+- `wiki/indexes/scopes.md`
+- `wiki/indexes/entities.md`
+- `wiki/indexes/concepts.md`
+- `wiki/indexes/tags.md`
+- `wiki/indexes/recent.md`
+- `wiki/indexes/hot.md`
+- `wiki/indexes/query-usage.jsonl`
+
+If index inconsistencies are found, recommend:
 
 ```bash
-openwiki page list --json
+openwiki index rebuild
 ```
 
-Read `wiki/index.md` and all files in `wiki/pages/`. Build a map of:
+### 3. Verify output completeness
 
-- all existing slugs
-- all `[[slug]]` references
-- all `sources` listed in frontmatter
+Check that:
 
-### 2. Run all checks
+- every page file was scanned.
+- every Red Error has a concrete fix suggestion.
+- every Yellow Warning has an explanation.
+- every index inconsistency names the affected shard index and slug/path.
 
-详见 `references/rules-catalog.md`。按严重程度分为三级：
+### 4. Write the lint report
 
-**Red Errors**: broken-links, missing-frontmatter
+Write `concepts/lint-<today>.md` directly as Markdown and summarize all findings with concrete remediation suggestions.
 
-**Yellow Warnings**: orphan-pages, contradictions, stale-claims, content-not-chinese-primary, missing-chinese-title, missing-term-glossary, missing-bilingual-tags, missing-scope-fields, invalid-scope-level, invalid-scope-code-format, scope-level-code-mismatch, invalid-entity-type
-
-**语言规则启用条件**：仅当 `openwiki.toml` 中 `primary_language` 为 `zh` 时启用语言规则。若 `openwiki.toml` 不含 `primary_language` 字段（旧格式），默认视为 `zh`。
-
-**英文豁免清单**：详见 `references/exemption-checklist.md`。
-
-**Blue Info**: missing-concept-pages, missing-cross-references, hardcoded-or-literal-today
-
-### 2.1 验证输出完整性
-
-检查是否所有页面都被扫描（页面数与 `wiki/pages/` 中文件数一致），所有 Red Errors 是否都有对应的修复建议，所有 Yellow Warnings 是否都有对应的说明。若发现遗漏，补充后再生成报告。
-
-### 3. Write the lint report
-
-Write `concepts/lint-<today>.md` and summarize all findings with concrete remediation suggestions.
-
-### 4. Update `wiki/index.md`
-
-Add a row for the lint report under **Concepts Pages**.
+Update `wiki/indexes/concepts.md`, `wiki/indexes/tags.md`, and `wiki/indexes/recent.md` for the lint report. Keep `wiki/index.md` lightweight.
 
 ### 5. Offer concrete fixes
 
-For each fixable category, offer precise edits and show diffs before writing.
+For each fixable category, offer precise edits and show diffs before writing. If the fix is purely index drift, recommend `openwiki index rebuild` before manual edits.
 
 ### 6. Append to `wiki/log.md`
 
-Always append a `lint` entry with issue counts and any fixes applied.
+Always append a `lint` entry with issue counts, index health summary, and any fixes applied.

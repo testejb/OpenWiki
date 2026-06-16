@@ -71,8 +71,17 @@ func runInit(stdout, stderr io.Writer, opts *GlobalOptions, args []string) error
 				wikiRoot + "/wiki/index.md",
 				wikiRoot + "/wiki/log.md",
 				wikiRoot + "/wiki/pages/",
+				wikiRoot + "/wiki/indexes/",
+				wikiRoot + "/wiki/indexes/scopes.md",
+				wikiRoot + "/wiki/indexes/entities.md",
+				wikiRoot + "/wiki/indexes/concepts.md",
+				wikiRoot + "/wiki/indexes/tags.md",
+				wikiRoot + "/wiki/indexes/recent.md",
+				wikiRoot + "/wiki/indexes/hot.md",
+				wikiRoot + "/wiki/indexes/query-usage.jsonl",
 				wikiRoot + "/raw/",
 				wikiRoot + "/concepts/",
+				wikiRoot + "/entities/",
 			},
 		}, nil)
 	}

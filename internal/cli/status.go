@@ -10,9 +10,10 @@ import (
 )
 
 type StatusResult struct {
-	Pages   PageStats        `json:"pages"`
-	Config  ConfigInfo       `json:"config"`
-	Details []PageDetail     `json:"details,omitempty"`
+	Pages   PageStats    `json:"pages"`
+	Config  ConfigInfo   `json:"config"`
+	Index   IndexStatus  `json:"index"`
+	Details []PageDetail `json:"details,omitempty"`
 }
 
 type PageStats struct {
@@ -25,6 +26,13 @@ type PageStats struct {
 type ConfigInfo struct {
 	Source string `json:"source"`
 	Path   string `json:"path"`
+}
+
+type IndexStatus struct {
+	Health         string   `json:"health"`
+	MissingFiles   []string `json:"missing_files,omitempty"`
+	UnindexedPages []string `json:"unindexed_pages,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 type PageDetail struct {
@@ -66,9 +74,7 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 		ByScope: make(map[string]int),
 	}
 
-	allSlugs := make(map[string]bool)
 	for _, p := range pages {
-		allSlugs[p.Slug] = true
 		scopeKey := p.ScopeLevel
 		if p.ScopeCode != "" {
 			scopeKey = p.ScopeLevel + "/" + p.ScopeCode
@@ -100,12 +106,24 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 		}
 	}
 
+	indexStatus := IndexStatus{Health: "unknown"}
+	if check, err := wiki.CheckIndex(fs, cfg.WikiRoot); err == nil {
+		indexStatus = IndexStatus{
+			Health:         check.Health,
+			MissingFiles:   check.MissingFiles,
+			UnindexedPages: check.UnindexedPages,
+		}
+	} else {
+		indexStatus.Error = err.Error()
+	}
+
 	statusResult := StatusResult{
-		Pages:  stats,
+		Pages: stats,
 		Config: ConfigInfo{
 			Source: result.Source,
 			Path:   result.Path,
 		},
+		Index:   indexStatus,
 		Details: details,
 	}
 
@@ -115,6 +133,16 @@ func runStatus(stdout, stderr io.Writer, opts *GlobalOptions, args []string) err
 
 	fmt.Fprintf(stdout, "配置来源: %s (%s)\n", result.Source, result.Path)
 	fmt.Fprintf(stdout, "页面总数: %d\n", stats.Total)
+	fmt.Fprintf(stdout, "索引健康状态: %s\n", indexStatus.Health)
+	if indexStatus.Error != "" {
+		fmt.Fprintf(stdout, "索引检查错误: %s\n", indexStatus.Error)
+	}
+	if len(indexStatus.MissingFiles) > 0 {
+		fmt.Fprintf(stdout, "缺失索引文件: %v\n", indexStatus.MissingFiles)
+	}
+	if len(indexStatus.UnindexedPages) > 0 {
+		fmt.Fprintf(stdout, "未索引页面: %v\n", indexStatus.UnindexedPages)
+	}
 	fmt.Fprintf(stdout, "按范围统计:\n")
 	for scope, count := range stats.ByScope {
 		fmt.Fprintf(stdout, "  %s: %d\n", scope, count)
