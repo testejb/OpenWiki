@@ -141,6 +141,64 @@ func TestScanAppendUsesProcessedBytes(t *testing.T) {
 	}
 }
 
+func TestScanDoesNotAdvancePastIncompleteTrailingLine(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	completeLine := `{"session_id":"s1","ts":1781597600,"text":"第一条记录"}` + "\n"
+	incompleteLine := `{"session_id":"s2","ts":1781597660,"text":`
+	writeCandidateFile(t, historyPath, completeLine+incompleteLine)
+	cfg := testCodeAgentConfig(root, historyPath)
+
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	firstPending := loadPendingForTest(t, first.PendingPath)
+	if len(firstPending.Records) != 1 {
+		t.Fatalf("expected only the complete line in pending, got %#v", firstPending.Records)
+	}
+	if firstPending.Records[0].Text != "第一条记录" {
+		t.Fatalf("expected first complete record, got %#v", firstPending.Records[0])
+	}
+	if hasWarningCode(firstPending.Warnings, "JSONL_PARSE_FAILED") {
+		t.Fatalf("expected incomplete trailing line not to produce parse warning, got %#v", firstPending.Warnings)
+	}
+	update := firstPending.StateUpdates[historyPath]
+	if update.ProcessedBytes != int64(len(completeLine)) {
+		t.Fatalf("expected processed bytes to stop at complete line boundary %d, got %d", len(completeLine), update.ProcessedBytes)
+	}
+	if info, err := os.Stat(historyPath); err != nil {
+		t.Fatalf("stat history: %v", err)
+	} else if update.ProcessedBytes == info.Size() {
+		t.Fatalf("expected processed bytes not to advance to EOF %d", info.Size())
+	}
+	if update.ProcessedLines != 1 {
+		t.Fatalf("expected processed lines to count only complete newline lines, got %d", update.ProcessedLines)
+	}
+
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+	if _, err := candidate.CommitCodeAgent(first.PendingPath, "https://example.com/review-1", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("first CommitCodeAgent returned error: %v", err)
+	}
+
+	appendCandidateFile(t, historyPath, `"第二条记录"}`+"\n")
+	second, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Hour), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	secondPending := loadPendingForTest(t, second.PendingPath)
+	if len(secondPending.Records) != 1 {
+		t.Fatalf("expected completed trailing line to be parsed on next scan, got %#v", secondPending.Records)
+	}
+	if secondPending.Records[0].Text != "第二条记录" {
+		t.Fatalf("expected second record after completion, got %#v", secondPending.Records[0])
+	}
+	if secondPending.Records[0].LineStart != 2 {
+		t.Fatalf("expected completed record to keep line 2, got %d", secondPending.Records[0].LineStart)
+	}
+}
+
 func TestScanResetAppliesInitialDaysFilter(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")

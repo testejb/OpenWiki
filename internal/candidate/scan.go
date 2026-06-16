@@ -249,7 +249,7 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 	if err != nil {
 		return nil, nil, reset, warnings, err
 	}
-	lineCount, err := countLines(path)
+	safeProcessedBytes, safeProcessedLines, err := safeJSONLProcessedBoundary(path)
 	if err != nil {
 		return nil, nil, reset, warnings, err
 	}
@@ -261,10 +261,10 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 		FileID:         currentFileID,
 		Size:           info.Size(),
 		MTime:          mtime,
-		ProcessedLines: lineCount,
-		ProcessedBytes: info.Size(),
+		ProcessedLines: safeProcessedLines,
+		ProcessedBytes: safeProcessedBytes,
 		TailHash:       currentTailHash,
-		BoundaryHash:   mustBoundaryHash(path, info.Size()),
+		BoundaryHash:   mustBoundaryHash(path, safeProcessedBytes),
 		LastScannedAt:  lastScannedAt,
 	}
 	return records, &update, reset, warnings, nil
@@ -701,4 +701,36 @@ func countLines(path string) (int, error) {
 		lines++
 	}
 	return lines, nil
+}
+
+func safeJSONLProcessedBoundary(path string) (int64, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+	buffer := make([]byte, 32*1024)
+	var offset int64
+	var lastNewlineOffset int64
+	lines := 0
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			for i, b := range chunk {
+				if b == '\n' {
+					lines++
+					lastNewlineOffset = offset + int64(i) + 1
+				}
+			}
+			offset += int64(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	return lastNewlineOffset, lines, nil
 }

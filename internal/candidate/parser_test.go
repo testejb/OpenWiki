@@ -127,7 +127,7 @@ func TestParseJSONLFileSkipsMalformedLines(t *testing.T) {
 	}
 }
 
-func TestParseJSONLFileLastLineWithoutNewlineUsesFileSize(t *testing.T) {
+func TestParseJSONLFileSkipsTrailingLineWithoutNewline(t *testing.T) {
 	content := `{"session_id":"s1","ts":1781597600,"text":"无换行结尾"}`
 	path := writeRawFile(t, "history-no-newline.jsonl", content)
 	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
@@ -140,11 +140,8 @@ func TestParseJSONLFileLastLineWithoutNewlineUsesFileSize(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("expected no warnings, got %#v", warnings)
 	}
-	if len(records) != 1 {
-		t.Fatalf("expected 1 record, got %d: %#v", len(records), records)
-	}
-	if records[0].ByteEnd != int64(len(content)) {
-		t.Errorf("expected ByteEnd to equal file size %d, got %d", len(content), records[0].ByteEnd)
+	if len(records) != 0 {
+		t.Fatalf("expected trailing line without newline to wait for completion, got %d: %#v", len(records), records)
 	}
 }
 

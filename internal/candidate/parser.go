@@ -51,6 +51,9 @@ func ParseJSONLFile(agent AgentConfig, path string, startByte int64, startLine i
 				return records, warnings, err
 			}
 		}
+		if err == io.EOF && len(rawLine) > 0 && rawLine[len(rawLine)-1] != '\n' {
+			break
+		}
 
 		lineNo++
 		byteEnd := byteStart + int64(len(rawLine))
