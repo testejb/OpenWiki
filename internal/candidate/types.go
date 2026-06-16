@@ -55,6 +55,7 @@ type FileState struct {
 	ProcessedLines int    `json:"processed_lines"`
 	ProcessedBytes int64  `json:"processed_bytes"`
 	TailHash       string `json:"tail_hash"`
+	BoundaryHash   string `json:"boundary_hash,omitempty"`
 	LastScannedAt  string `json:"last_scanned_at"`
 }
 
@@ -74,6 +75,7 @@ type Pending struct {
 	Limits       PendingLimits        `json:"limits"`
 	Records      []Record             `json:"records"`
 	StateUpdates map[string]FileState `json:"state_updates"`
+	BaseState    map[string]FileState `json:"base_state,omitempty"`
 	Warnings     []Warning            `json:"warnings,omitempty"`
 	ReviewDocURL string               `json:"review_doc_url,omitempty"`
 	SnapshotPath string               `json:"snapshot_path,omitempty"`

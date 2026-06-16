@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bytedance/openwiki/internal/candidate"
 )
@@ -80,5 +81,34 @@ func TestCommitAdvancesStateAndMarksPending(t *testing.T) {
 	}
 	if len(runLog) == 0 {
 		t.Fatalf("expected non-empty run log")
+	}
+}
+
+func TestCommitRejectsStalePending(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	pending1, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+
+	appendCandidateFile(t, historyPath, `{"session_id":"s2","ts":1781597660,"text":"第二条记录"}`+"\n")
+	pending2, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Second), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+	if _, err := candidate.CommitCodeAgent(pending2.PendingPath, "https://example.com/review-new", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("commit newer pending returned error: %v", err)
+	}
+	if _, err := candidate.CommitCodeAgent(pending1.PendingPath, "https://example.com/review-old", snapshotPath, fixedCommitTime().Add(time.Second)); err == nil {
+		t.Fatalf("expected stale pending commit to fail")
+	}
+	state := loadStateForTest(t, cfg.StatePath)
+	if state.Files[historyPath].ProcessedLines != 2 {
+		t.Fatalf("expected state to remain at newer progress, got %#v", state.Files[historyPath])
 	}
 }

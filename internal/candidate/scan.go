@@ -29,7 +29,8 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 
 	var records []Record
 	var warnings []Warning
-	stateUpdates := map[string]FileState{}
+	fileUpdates := map[string]FileState{}
+	baseState := map[string]FileState{}
 
 	for _, agent := range cfg.Agents {
 		if !agent.Enabled {
@@ -38,20 +39,24 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 		paths, pathWarnings := expandAgentPaths(agent)
 		warnings = append(warnings, pathWarnings...)
 		for _, path := range paths {
-			fileRecords, update, fileWarnings, err := scanOneFile(agent, path, state.Files[path], now)
+			previous := state.Files[path]
+			fileRecords, update, fileWarnings, err := scanOneFile(agent, path, previous, now)
 			warnings = append(warnings, fileWarnings...)
 			if err != nil {
 				return ScanResult{}, err
 			}
 			if update != nil {
-				stateUpdates[path] = *update
+				fileUpdates[path] = *update
+				baseState[path] = previous
 			}
 			records = append(records, fileRecords...)
 		}
 	}
 
 	records = filterFirstRun(records, state, initialDays, now)
-	records = keepLatestRecords(records, maxRecords)
+	records = keepFirstRecords(records, maxRecords)
+	stateUpdates := stateUpdatesForPendingRecords(records, fileUpdates, now)
+	baseState = baseStateForUpdates(baseState, stateUpdates)
 
 	pending := Pending{
 		Version:   stateVersion,
@@ -72,9 +77,13 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 		},
 		Records:      records,
 		StateUpdates: stateUpdates,
+		BaseState:    baseState,
 		Warnings:     warnings,
 	}
-	pendingPath := filepath.Join(cfg.PendingDir, pendingFileName(now))
+	pendingPath, err := nextPendingPath(cfg.PendingDir, now)
+	if err != nil {
+		return ScanResult{}, err
+	}
 	if err := SavePendingAtomic(pendingPath, pending); err != nil {
 		return ScanResult{}, err
 	}
@@ -123,6 +132,12 @@ func CommitCodeAgent(pendingPath, reviewDocURL, snapshotPath string, now time.Ti
 	}
 	if state.Files == nil {
 		state.Files = map[string]FileState{}
+	}
+	for path, base := range pending.BaseState {
+		current := state.Files[path]
+		if !fileStateMatchesBase(current, base) {
+			return CommitResult{}, fmt.Errorf("stale pending %s: state for %s changed since scan", pendingPath, path)
+		}
 	}
 	for path, update := range pending.StateUpdates {
 		state.Files[path] = update
@@ -187,10 +202,14 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 	startLine := 0
 	var warnings []Warning
 	if previous.FileID != "" {
+		boundaryTrusted, err := processedBoundaryMatches(path, previous)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		switch {
-		case previous.FileID == currentFileID && info.Size() == previous.ProcessedBytes && previous.TailHash == currentTailHash:
+		case previous.FileID == currentFileID && info.Size() == previous.ProcessedBytes && previous.TailHash == currentTailHash && boundaryTrusted:
 			return nil, nil, nil, nil
-		case previous.FileID == currentFileID && info.Size() > previous.ProcessedBytes:
+		case previous.FileID == currentFileID && info.Size() > previous.ProcessedBytes && boundaryTrusted:
 			startByte = previous.ProcessedBytes
 			startLine = previous.ProcessedLines
 		default:
@@ -218,6 +237,7 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 		ProcessedLines: lineCount,
 		ProcessedBytes: info.Size(),
 		TailHash:       currentTailHash,
+		BoundaryHash:   mustBoundaryHash(path, info.Size()),
 		LastScannedAt:  lastScannedAt,
 	}
 	return records, &update, warnings, nil
@@ -297,21 +317,11 @@ func filterFirstRun(records []Record, state State, initialDays int, now time.Tim
 	return filtered
 }
 
-func keepLatestRecords(records []Record, maxRecords int) []Record {
+func keepFirstRecords(records []Record, maxRecords int) []Record {
 	if maxRecords <= 0 || len(records) <= maxRecords {
 		return records
 	}
-	sort.SliceStable(records, func(i, j int) bool {
-		return recordSortKey(records[i]).Before(recordSortKey(records[j]))
-	})
-	latest := append([]Record(nil), records[len(records)-maxRecords:]...)
-	sort.SliceStable(latest, func(i, j int) bool {
-		if latest[i].SourceFile == latest[j].SourceFile {
-			return latest[i].ByteStart < latest[j].ByteStart
-		}
-		return latest[i].SourceFile < latest[j].SourceFile
-	})
-	return latest
+	return append([]Record(nil), records[:maxRecords]...)
 }
 
 func recordSortKey(record Record) time.Time {
@@ -323,8 +333,58 @@ func recordSortKey(record Record) time.Time {
 	return time.Unix(0, record.ByteEnd)
 }
 
-func pendingFileName(now time.Time) string {
-	return now.UTC().Format("20060102T150405Z") + "-scan.json"
+func nextPendingPath(pendingDir string, now time.Time) (string, error) {
+	if err := os.MkdirAll(pendingDir, atomicDirFileMode); err != nil {
+		return "", err
+	}
+	prefix := now.UTC().Format("20060102T150405.000000000Z") + "-scan-"
+	file, err := os.CreateTemp(pendingDir, prefix+"*.json")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func stateUpdatesForPendingRecords(records []Record, fileUpdates map[string]FileState, now time.Time) map[string]FileState {
+	updates := map[string]FileState{}
+	for _, record := range records {
+		base, ok := fileUpdates[record.SourceFile]
+		if !ok {
+			continue
+		}
+		update := base
+		update.ProcessedBytes = record.ByteEnd
+		update.ProcessedLines = record.LineEnd
+		update.LastScannedAt = now.UTC().Format(time.RFC3339)
+		if boundary, err := boundaryHash(record.SourceFile, record.ByteEnd); err == nil {
+			update.BoundaryHash = boundary
+		}
+		updates[record.SourceFile] = update
+	}
+	return updates
+}
+
+func baseStateForUpdates(baseState map[string]FileState, stateUpdates map[string]FileState) map[string]FileState {
+	filtered := map[string]FileState{}
+	for path := range stateUpdates {
+		filtered[path] = baseState[path]
+	}
+	return filtered
+}
+
+func fileStateMatchesBase(current, base FileState) bool {
+	if base.FileID == "" && base.ProcessedBytes == 0 && base.ProcessedLines == 0 && base.BoundaryHash == "" {
+		return current.FileID == "" && current.ProcessedBytes == 0 && current.ProcessedLines == 0 && current.BoundaryHash == ""
+	}
+	return current.FileID == base.FileID &&
+		current.ProcessedBytes == base.ProcessedBytes &&
+		current.ProcessedLines == base.ProcessedLines &&
+		current.BoundaryHash == base.BoundaryHash
 }
 
 func summarizeRecords(records []Record) ScanRecordSummary {
@@ -340,6 +400,53 @@ func fileID(info os.FileInfo) string {
 		return fmt.Sprintf("%d:%d", uint64(stat.Dev), uint64(stat.Ino))
 	}
 	return fmt.Sprintf("%s:%d", info.Name(), info.ModTime().UnixNano())
+}
+
+func processedBoundaryMatches(path string, previous FileState) (bool, error) {
+	if previous.BoundaryHash == "" {
+		return true, nil
+	}
+	current, err := boundaryHash(path, previous.ProcessedBytes)
+	if err != nil {
+		return false, err
+	}
+	return current == previous.BoundaryHash, nil
+}
+
+func mustBoundaryHash(path string, byteEnd int64) string {
+	hash, err := boundaryHash(path, byteEnd)
+	if err != nil {
+		return ""
+	}
+	return hash
+}
+
+func boundaryHash(path string, byteEnd int64) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	if byteEnd > info.Size() {
+		return "", nil
+	}
+	const boundarySize int64 = 4096
+	start := int64(0)
+	if byteEnd > boundarySize {
+		start = byteEnd - boundarySize
+	}
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	if _, err := io.CopyN(hash, file, byteEnd-start); err != nil && err != io.EOF {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func tailHash(path string) (string, error) {

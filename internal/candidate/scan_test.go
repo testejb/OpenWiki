@@ -173,3 +173,116 @@ func appendCandidateFile(t *testing.T, path, content string) {
 		t.Fatalf("append %s: %v", path, err)
 	}
 }
+
+func TestScanMaxRecordsDoesNotAdvancePastPendingRecords(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath,
+		`{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n"+
+			`{"session_id":"s2","ts":1781597660,"text":"第二条记录"}`+"\n"+
+			`{"session_id":"s3","ts":1781597720,"text":"第三条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+
+	result, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("ScanCodeAgent returned error: %v", err)
+	}
+	pending := loadPendingForTest(t, result.PendingPath)
+	if len(pending.Records) != 2 {
+		t.Fatalf("expected maxRecords to keep 2 records, got %d", len(pending.Records))
+	}
+	if pending.Records[0].Text != "第一条记录" || pending.Records[1].Text != "第二条记录" {
+		t.Fatalf("expected first two unprocessed records, got %#v", pending.Records)
+	}
+	update := pending.StateUpdates[historyPath]
+	if update.ProcessedBytes != pending.Records[1].ByteEnd {
+		t.Fatalf("expected state update bytes to stop at pending last record %d, got %d", pending.Records[1].ByteEnd, update.ProcessedBytes)
+	}
+	if update.ProcessedLines != pending.Records[1].LineEnd {
+		t.Fatalf("expected state update lines to stop at pending last record %d, got %d", pending.Records[1].LineEnd, update.ProcessedLines)
+	}
+
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+	if _, err := candidate.CommitCodeAgent(result.PendingPath, "https://example.com/review", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("CommitCodeAgent returned error: %v", err)
+	}
+	state := loadStateForTest(t, cfg.StatePath)
+	if state.Files[historyPath].ProcessedBytes != pending.Records[1].ByteEnd {
+		t.Fatalf("expected committed state not to advance past pending records, got %#v", state.Files[historyPath])
+	}
+
+	next, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Hour), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("next ScanCodeAgent returned error: %v", err)
+	}
+	nextPending := loadPendingForTest(t, next.PendingPath)
+	if len(nextPending.Records) != 1 || nextPending.Records[0].Text != "第三条记录" {
+		t.Fatalf("expected next scan to return third record, got %#v", nextPending.Records)
+	}
+}
+
+func TestScanDetectsRewriteBeforeAppend(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"old","ts":1781597600,"text":"旧记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+	if _, err := candidate.CommitCodeAgent(first.PendingPath, "https://example.com/review", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("CommitCodeAgent returned error: %v", err)
+	}
+
+	writeCandidateFile(t, historyPath,
+		`{"session_id":"new1","ts":1781597660,"text":"新记录一"}`+"\n"+
+			`{"session_id":"new2","ts":1781597720,"text":"新记录二"}`+"\n")
+	second, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Hour), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	pending := loadPendingForTest(t, second.PendingPath)
+	if len(pending.Records) != 2 || pending.Records[0].Text != "新记录一" || pending.Records[0].LineStart != 1 {
+		t.Fatalf("expected rewritten file to scan from start, got %#v", pending.Records)
+	}
+	if !hasWarningCode(pending.Warnings, "SOURCE_FILE_RESET") && !hasWarningCode(pending.Warnings, "SOURCE_FILE_REWRITTEN") {
+		t.Fatalf("expected rewrite/reset warning, got %#v", pending.Warnings)
+	}
+}
+
+func TestScanCreatesUniquePendingPathsWithinSameSecond(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	second, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	if first.PendingPath == second.PendingPath {
+		t.Fatalf("expected unique pending paths within same second, got %s", first.PendingPath)
+	}
+	if _, err := os.Stat(first.PendingPath); err != nil {
+		t.Fatalf("expected first pending file to exist: %v", err)
+	}
+	if _, err := os.Stat(second.PendingPath); err != nil {
+		t.Fatalf("expected second pending file to exist: %v", err)
+	}
+}
+
+func hasWarningCode(warnings []candidate.Warning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
+}

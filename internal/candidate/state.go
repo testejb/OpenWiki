@@ -71,6 +71,9 @@ func LoadPending(path string) (Pending, error) {
 	if pending.StateUpdates == nil {
 		pending.StateUpdates = map[string]FileState{}
 	}
+	if pending.BaseState == nil {
+		pending.BaseState = map[string]FileState{}
+	}
 	return pending, nil
 }
 
@@ -83,6 +86,9 @@ func SavePendingAtomic(path string, pending Pending) error {
 	}
 	if pending.StateUpdates == nil {
 		pending.StateUpdates = map[string]FileState{}
+	}
+	if pending.BaseState == nil {
+		pending.BaseState = map[string]FileState{}
 	}
 	return writeJSONAtomic(path, pending)
 }
