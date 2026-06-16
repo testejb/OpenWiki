@@ -41,6 +41,16 @@ func TestCandidateCodeAgentScanJSON(t *testing.T) {
 	}
 }
 
+func TestCandidateCodeAgentScanJSONConfigNotFound(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"--config", "/nonexistent/openwiki.toml", "candidate", "codeagent", "scan", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("expected JSON error envelope without Go error, got: %v", err)
+	}
+
+	assertCandidateConfigNotFound(t, stdout.Bytes())
+}
+
 func TestCandidateCodeAgentCommitJSON(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath, wikiRoot := setupCandidateCLIConfig(t, dir)
@@ -99,6 +109,16 @@ func TestCandidateCodeAgentStatusJSON(t *testing.T) {
 	if _, ok := data["tracked_files"]; !ok {
 		t.Fatalf("expected tracked_files in status data, got %#v", data)
 	}
+}
+
+func TestCandidateCodeAgentStatusJSONConfigNotFound(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"--config", "/nonexistent/openwiki.toml", "candidate", "codeagent", "status", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("expected JSON error envelope without Go error, got: %v", err)
+	}
+
+	assertCandidateConfigNotFound(t, stdout.Bytes())
 }
 
 func TestCandidateRootHelpIncludesCandidate(t *testing.T) {
@@ -259,4 +279,19 @@ func responseDataMap(t *testing.T, resp output.Response) map[string]interface{} 
 		t.Fatalf("expected response data to be map, got %#v", resp.Data)
 	}
 	return data
+}
+
+func assertCandidateConfigNotFound(t *testing.T, data []byte) {
+	t.Helper()
+
+	resp := decodeCLIResponse(t, data)
+	if resp.Success {
+		t.Fatal("expected success=false for missing config")
+	}
+	if resp.Error == nil {
+		t.Fatal("expected JSON error")
+	}
+	if resp.Error.Code != "CONFIG_NOT_FOUND" {
+		t.Fatalf("expected CONFIG_NOT_FOUND, got %q", resp.Error.Code)
+	}
 }
