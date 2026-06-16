@@ -8,14 +8,16 @@
 
 ## 8 类候选
 
-1. **可复用操作流程**：跨项目可复用的步骤、命令序列、检查清单、排障流程。
-2. **项目事实**：仓库结构、配置位置、运行约束、约定目录、默认路径、构建或测试入口。
-3. **工具用法**：CLI、脚本、MCP、插件、内部工具的有效命令、参数、输入输出契约。
-4. **故障与修复**：明确错误现象、根因、验证过的修复方法、避免复发的检查点。
-5. **决策与权衡**：为什么选择某方案、放弃某方案、适用条件、限制和后续影响。
-6. **接口与数据契约**：API、配置字段、JSON schema、文件格式、协议头、解析规则。
-7. **环境与权限约束**：运行环境、认证前提、网络/沙箱限制、远端分支或发布流程要求。
-8. **来源与上下文索引**：有长期价值的外部链接、Feishu 文档链接、issue/PR/MR 链接、讨论入口及其上下文说明。
+只允许使用以下 8 类，不要新增计划外类别：
+
+1. **工具/产品使用说明**：工具、产品、插件、MCP、CLI 或平台能力的使用方法、限制和注意事项。
+2. **工作流/流程规范**：跨任务可复用的操作流程、审核流程、发布流程、检查清单或协作步骤。
+3. **项目规则/团队约定**：仓库规则、团队约定、提交规范、目录约定、运行约束或评审要求。
+4. **可复用问题排查经验**：明确错误现象、根因、验证过的修复方法、诊断命令和避免复发的检查点。
+5. **外部资料索引**：有长期价值的 external URL、Feishu URL、issue、PR/MR、文章或文档入口及上下文说明。
+6. **设计决策/架构知识**：方案选择、取舍、边界、接口设计、数据模型、架构约束和后续影响。
+7. **命令与配置片段**：可复用命令、配置字段、JSON/TOML/YAML 片段、协议头、脚本入口或参数组合。
+8. **用户明确给出的知识材料**：用户直接提供、要求沉淀或可作为知识来源的文字、文档、会议纪要、素材或结论。
 
 ## Do Not Extract
 
@@ -32,29 +34,38 @@
 
 ## Redaction
 
-- 必须在写入 Feishu 审核文档、snapshot 或候选输出前脱敏。
-- 对疑似密钥、token、Cookie、Authorization header、私钥、临时访问链接中的敏感参数使用 `[REDACTED]`。
+必须在写入 Feishu 审核文档、snapshot 或候选输出前脱敏。对以下内容使用 `[REDACTED]` 或保留结构后局部脱敏：
+
+- token、password、private key、secret、cookie、auth header、Authorization header。
+- 手机号、邮箱、个人账号、个人身份标识。
+- 绝对本地路径中的用户名，例如 `/Users/zhangsan/...` 应改写为 `/Users/<user>/...` 或等价占位，不暴露真实用户名。
+- 明显内部凭据、长随机 ID、访问票据、会话 ID、临时签名值。
+- URL query 参数中名为或疑似 `token`、`key`、`signature`、`auth`、`password`、`secret`、`cookie`、`session` 的值。
+
+脱敏时遵守：
+
 - 保留判断上下文需要的非敏感结构，例如变量名、配置键名、错误类型。
 - 不要脱敏普通来源链接本身，除非链接包含凭据或敏感查询参数。
 - 明确保留 external URL 和 Feishu URL 的原始链接；如果链接含敏感参数，只脱敏敏感参数并说明已脱敏。
 
 ## Candidate Field Requirements
 
-每个候选至少应包含：
+每个候选必须使用以下计划字段：
 
+- `candidate_id`：稳定 ID，例如 `CAND-001`；同一审核文档内唯一。
+- `slug`：英文小写短横线 slug，例如 `openwiki-runtime-discovery`；用于候选标题行和后续定位。
 - `title`：简洁中文标题，说明候选知识点。
-- `category`：使用上述 8 类之一。
-- `summary`：1-3 句中文摘要，说明可复用知识。
-- `evidence`：来自 pending 记录的证据摘要，避免粘贴大段原文。
-- `source_ref`：pending 记录 ID、会话 ID、文件片段标识或 CLI 提供的来源定位。
-- `source_urls`：原样保留 external URL 和 Feishu URL 原始链接；没有则为空列表。
-- `confidence`：`high`、`medium` 或 `low`，反映证据强度。
-- `suggested_destination`：后续可能进入的 wiki 页面、entity、concept 或 `unknown`。
-- `redactions`：说明是否做过脱敏，以及脱敏类型。
-- `review_state`：初始必须是 unchecked；不得默认 accepted。
+- `category`：只能使用上述 8 类之一。
+- `target_wiki_area`：建议进入的 wiki 区域，例如 `wiki/pages`、`entities`、`concepts`、`indexes`、`unknown`。
+- `reason`：为什么值得进入审核，说明复用价值或沉淀原因。
+- `proposed_content`：建议写入 wiki 的候选内容草稿，使用中文，避免未经审核的绝对化表述。
+- `evidence`：来自 pending 记录的证据摘要或引用定位，避免粘贴大段原文。
+- `risk_and_redaction`：风险、敏感信息处理、脱敏说明；无风险也写 `none`。
+- `original_links`：原样保留 external URL 和 Feishu URL 原始链接；没有则为空列表。
 
 ## 链接保留要求
 
 - external URL 必须保留原始链接，不改写、不短链化、不翻译。
 - Feishu URL 必须保留原始链接，不替换为标题或截图。
 - 同一候选有多个来源链接时全部列出，除非完全重复。
+- 如果 URL query 含敏感参数，只脱敏敏感参数值，保留 URL 的来源可识别性。

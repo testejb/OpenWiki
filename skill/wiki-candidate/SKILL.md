@@ -38,6 +38,8 @@ go run ./cmd/openwiki config show --json
 
 Use the same global CLI or `go run ./cmd/openwiki ...` form consistently for candidate commands. When an explicit config is known, include `--config /path/to/openwiki.toml`.
 
+If both the global CLI and `go run ./cmd/openwiki ...` fallback are unavailable, ask the user to install or update the OpenWiki CLI, or provide an explicit `openwiki.toml` path. Do not continue with manual path guessing or manual codeagent file scanning.
+
 ## CodeAgent Candidate Flow
 
 1. Run the scan command. Include `--config` when a config path is known:
@@ -50,13 +52,27 @@ Use the same global CLI or `go run ./cmd/openwiki ...` form consistently for can
 2. Read the returned `pending` path or identifier. Inspect the pending candidate payload produced by the CLI, not raw codeagent source files.
 3. If the scan returns zero records, stop. Report that no candidate review material was created.
 4. Read `references/codeagent-extraction-rules.md`.
-5. Extract balanced-recall candidates from the pending records:
-   - include enough candidates to avoid missing reusable knowledge;
-   - avoid low-signal chatter, secrets, and purely local transient details;
-   - preserve original external URLs and Feishu URLs exactly.
+5. Extract balanced-recall candidates from the pending records. Each candidate must include exactly the planned review fields:
+   - `candidate_id`
+   - `slug`
+   - `title`
+   - `category`
+   - `target_wiki_area`
+   - `reason`
+   - `proposed_content`
+   - `evidence`
+   - `risk_and_redaction`
+   - `original_links`
+
+   Preserve original external URLs and Feishu URLs exactly in `original_links`.
 6. Read `references/review-doc-protocol.md`.
-7. Use `lark-doc` v2 to create a Feishu review document following the protocol. The document must contain the protocol header and reviewable candidate cards.
-8. Save a snapshot of the created review material into the configured `snapshot_dir` or the snapshot directory returned by the CLI. The snapshot must be enough to reconstruct what was sent to Feishu.
+7. Use `lark-doc` v2 to create a Feishu review document following the protocol. The document must contain the fixed title, protocol block, review instructions, overview, category sections, and reviewable candidate cards.
+8. Save a snapshot of the created review material into the configured `snapshot_dir` or the snapshot directory returned by the CLI. The snapshot must be enough to reconstruct what was sent to Feishu and must include:
+   - review doc URL;
+   - pending path;
+   - protocol version `OPENWIKI_CANDIDATE_REVIEW_DOC v1`;
+   - created time;
+   - all candidates with their planned fields.
 9. Only after both the Feishu review document and local snapshot are successfully created, commit the pending scan:
 
    ```bash
@@ -70,6 +86,7 @@ Use the same global CLI or `go run ./cmd/openwiki ...` form consistently for can
     - number of candidate cards created;
     - pending path or identifier;
     - snapshot path;
+    - state path reported by the commit command;
     - candidate output path under `<wiki_root>/candidate/` when reported by the CLI;
     - next step: user checks candidates in the Feishu document, then a later ingest/update workflow may admit only checked candidates.
 
