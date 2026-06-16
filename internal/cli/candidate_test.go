@@ -51,6 +51,16 @@ func TestCandidateCodeAgentScanJSONConfigNotFound(t *testing.T) {
 	assertCandidateConfigNotFound(t, stdout.Bytes())
 }
 
+func TestCandidateCodeAgentScanJSONConfigNotFoundWithSubcommandConfigFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"candidate", "codeagent", "scan", "--config", "/nonexistent/openwiki.toml", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("expected JSON error envelope without Go error, got: %v", err)
+	}
+
+	assertCandidateConfigNotFound(t, stdout.Bytes())
+}
+
 func TestCandidateCodeAgentCommitJSON(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath, wikiRoot := setupCandidateCLIConfig(t, dir)
@@ -114,6 +124,16 @@ func TestCandidateCodeAgentStatusJSON(t *testing.T) {
 func TestCandidateCodeAgentStatusJSONConfigNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := cli.RunWithIO([]string{"--config", "/nonexistent/openwiki.toml", "candidate", "codeagent", "status", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("expected JSON error envelope without Go error, got: %v", err)
+	}
+
+	assertCandidateConfigNotFound(t, stdout.Bytes())
+}
+
+func TestCandidateCodeAgentStatusJSONConfigNotFoundWithSubcommandShortConfigFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{"candidate", "codeagent", "status", "-c", "/nonexistent/openwiki.toml", "--json"}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("expected JSON error envelope without Go error, got: %v", err)
 	}
@@ -199,6 +219,38 @@ func TestCandidateCodeAgentCommitJSONUsesPendingWithoutConfig(t *testing.T) {
 	resp := decodeCLIResponse(t, stdout.Bytes())
 	if !resp.Success {
 		t.Fatalf("expected commit to use pending without config discovery, got error: %#v", resp.Error)
+	}
+}
+
+func TestCandidateCodeAgentCommitJSONAcceptsSubcommandConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath, wikiRoot := setupCandidateCLIConfig(t, dir)
+
+	pendingPath := scanCandidateForPending(t, tomlPath)
+	snapshotPath := filepath.Join(wikiRoot, "candidate", "codeagent", "reviews", "snapshot.md")
+	if err := os.MkdirAll(filepath.Dir(snapshotPath), 0755); err != nil {
+		t.Fatalf("mkdir snapshot dir failed: %v", err)
+	}
+	if err := os.WriteFile(snapshotPath, []byte("# review\n"), 0644); err != nil {
+		t.Fatalf("write snapshot failed: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := cli.RunWithIO([]string{
+		"candidate", "codeagent", "commit",
+		"--config", filepath.Join(dir, "missing-openwiki.toml"),
+		"--pending", pendingPath,
+		"--review-doc-url", "https://example.com/review",
+		"--snapshot", snapshotPath,
+		"--json",
+	}, "1.0.0", "2026-06-01T00:00:00Z", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resp := decodeCLIResponse(t, stdout.Bytes())
+	if !resp.Success {
+		t.Fatalf("expected commit to accept subcommand --config without discovery, got error: %#v", resp.Error)
 	}
 }
 

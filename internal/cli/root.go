@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/bytedance/openwiki/internal/config"
 )
@@ -142,10 +143,18 @@ func discoverConfig(opts *GlobalOptions) (*config.Config, *config.DiscoveryResul
 
 func scanGlobalFlags(args []string, opts *GlobalOptions) []string {
 	var result []string
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "--json":
 			opts.JSON = true
+		case "--config", "-c":
+			if i+1 < len(args) {
+				opts.ConfigPath = args[i+1]
+				i++
+			} else {
+				result = append(result, arg)
+			}
 		case "--force", "-f":
 			opts.Force = true
 		case "--quiet", "-q":
@@ -155,7 +164,14 @@ func scanGlobalFlags(args []string, opts *GlobalOptions) []string {
 		case "--no-color":
 			opts.NoColor = true
 		default:
-			result = append(result, arg)
+			switch {
+			case strings.HasPrefix(arg, "--config="):
+				opts.ConfigPath = strings.TrimPrefix(arg, "--config=")
+			case strings.HasPrefix(arg, "-c="):
+				opts.ConfigPath = strings.TrimPrefix(arg, "-c=")
+			default:
+				result = append(result, arg)
+			}
 		}
 	}
 	return result
