@@ -68,21 +68,22 @@ type State struct {
 }
 
 type Pending struct {
-	Version         int                  `json:"version"`
-	Source          string               `json:"source"`
-	CreatedAt       string               `json:"created_at"`
-	Status          string               `json:"status"`
-	Config          PendingConfig        `json:"config"`
-	Limits          PendingLimits        `json:"limits"`
-	Records         []Record             `json:"records"`
-	StateUpdates    map[string]FileState `json:"state_updates"`
-	BaseState       map[string]FileState `json:"base_state,omitempty"`
-	BaseBacklogHash string               `json:"base_backlog_hash,omitempty"`
-	BacklogUpdate   []Record             `json:"backlog_update,omitempty"`
-	Warnings        []Warning            `json:"warnings,omitempty"`
-	ReviewDocURL    string               `json:"review_doc_url,omitempty"`
-	SnapshotPath    string               `json:"snapshot_path,omitempty"`
-	CommittedAt     string               `json:"committed_at,omitempty"`
+	Version          int                  `json:"version"`
+	Source           string               `json:"source"`
+	CreatedAt        string               `json:"created_at"`
+	Status           string               `json:"status"`
+	Config           PendingConfig        `json:"config"`
+	Limits           PendingLimits        `json:"limits"`
+	Records          []Record             `json:"records"`
+	StateUpdates     map[string]FileState `json:"state_updates"`
+	BaseState        map[string]FileState `json:"base_state,omitempty"`
+	BaseBacklogHash  string               `json:"base_backlog_hash,omitempty"`
+	BacklogUpdateSet bool                 `json:"backlog_update_set,omitempty"`
+	BacklogUpdate    []Record             `json:"backlog_update,omitempty"`
+	Warnings         []Warning            `json:"warnings,omitempty"`
+	ReviewDocURL     string               `json:"review_doc_url,omitempty"`
+	SnapshotPath     string               `json:"snapshot_path,omitempty"`
+	CommittedAt      string               `json:"committed_at,omitempty"`
 }
 
 type PendingConfig struct {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,7 +182,7 @@ func TestScanResetAppliesInitialDaysFilter(t *testing.T) {
 	}
 }
 
-func TestScanDisabledDoesNotExposeBacklog(t *testing.T) {
+func TestScanDisabledPendingDoesNotSerializeBacklog(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")
 	writeCandidateFile(t, historyPath,
@@ -216,8 +217,20 @@ func TestScanDisabledDoesNotExposeBacklog(t *testing.T) {
 	if len(pending.Records) != 0 {
 		t.Fatalf("expected disabled pending records to be empty, got %#v", pending.Records)
 	}
-	if len(pending.BacklogUpdate) != len(stateBefore.Backlog) {
-		t.Fatalf("expected disabled pending backlog update to retain existing backlog, got %#v want %#v", pending.BacklogUpdate, stateBefore.Backlog)
+	if len(pending.BacklogUpdate) != 0 {
+		t.Fatalf("expected disabled pending not to carry backlog update, got %#v", pending.BacklogUpdate)
+	}
+	rawPending, err := os.ReadFile(disabled.PendingPath)
+	if err != nil {
+		t.Fatalf("read disabled pending: %v", err)
+	}
+	if strings.Contains(string(rawPending), "backlog_update") {
+		t.Fatalf("expected disabled pending JSON not to serialize backlog_update, got %s", rawPending)
+	}
+	for _, record := range stateBefore.Backlog {
+		if strings.Contains(string(rawPending), record.Text) {
+			t.Fatalf("expected disabled pending JSON not to expose backlog record %q, got %s", record.Text, rawPending)
+		}
 	}
 
 	if _, err := candidate.CommitCodeAgent(disabled.PendingPath, "https://example.com/review-disabled", snapshotPath, fixedCommitTime().Add(time.Minute)); err != nil {
@@ -231,6 +244,39 @@ func TestScanDisabledDoesNotExposeBacklog(t *testing.T) {
 		if stateAfter.Backlog[i].Text != stateBefore.Backlog[i].Text {
 			t.Fatalf("expected disabled commit to preserve backlog, got %#v want %#v", stateAfter.Backlog, stateBefore.Backlog)
 		}
+	}
+}
+
+func TestExpandAgentPathsSupportsDoubleStarRecursive(t *testing.T) {
+	root := t.TempDir()
+	memoryPath := filepath.Join(root, "projects", "proj", "20260616", "session_memory_x.jsonl")
+	writeCandidateFile(t, memoryPath, `{"intent":"修复递归扫描","actions":["添加测试"],"outcome":"找到深层文件","learned":["doublestar"]}`+"\n")
+
+	cfg := testCodeAgentConfig(root, filepath.Join(root, "unused-history.jsonl"))
+	cfg.Agents = []candidate.AgentConfig{{
+		Name:    "trae-ide",
+		Type:    "trae-ide-memory",
+		Paths:   []string{filepath.Join(root, "projects", "**", "session_memory_*.jsonl")},
+		Enabled: true,
+	}}
+
+	result, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+
+	if err != nil {
+		t.Fatalf("ScanCodeAgent returned error: %v", err)
+	}
+	if result.Records.Total != 1 {
+		t.Fatalf("expected doublestar scan to find 1 record, got %d with warnings %#v", result.Records.Total, result.Warnings)
+	}
+	pending := loadPendingForTest(t, result.PendingPath)
+	if len(pending.Records) != 1 {
+		t.Fatalf("expected one pending record, got %#v", pending.Records)
+	}
+	if pending.Records[0].SourceFile != memoryPath {
+		t.Fatalf("expected source file %s, got %s", memoryPath, pending.Records[0].SourceFile)
+	}
+	if !strings.Contains(pending.Records[0].Text, "修复递归扫描") {
+		t.Fatalf("expected parsed memory text, got %#v", pending.Records[0])
 	}
 }
 

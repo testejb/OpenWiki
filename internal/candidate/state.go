@@ -68,6 +68,7 @@ func LoadPending(path string) (Pending, error) {
 	if err := json.Unmarshal(data, &pending); err != nil {
 		return Pending{}, err
 	}
+	pending.BacklogUpdateSet = pending.BacklogUpdateSet || jsonObjectHasKey(data, "backlog_update")
 	if pending.Version == 0 {
 		pending.Version = stateVersion
 	}
@@ -84,6 +85,15 @@ func LoadPending(path string) (Pending, error) {
 		pending.BacklogUpdate = []Record{}
 	}
 	return pending, nil
+}
+
+func jsonObjectHasKey(data []byte, key string) bool {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return false
+	}
+	_, ok := object[key]
+	return ok
 }
 
 func SavePendingAtomic(path string, pending Pending) error {

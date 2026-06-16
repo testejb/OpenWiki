@@ -65,11 +65,11 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 	warnings = append(warnings, firstRunWarnings...)
 	baseBacklogHash := hashRecords(state.Backlog)
 	var backlogUpdate []Record
+	backlogUpdateSet := false
 	if cfg.Enabled {
 		records = mergeRecords(state.Backlog, records)
 		records, backlogUpdate = keepLatestRecords(records, maxRecords)
-	} else {
-		backlogUpdate = append([]Record(nil), state.Backlog...)
+		backlogUpdateSet = true
 	}
 	stateUpdates := appendAllFileUpdates(fileUpdates)
 	baseState = baseStateForUpdates(baseState, stateUpdates)
@@ -91,12 +91,13 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 			InitialDays:      initialDays,
 			MaxRecordsPerRun: maxRecords,
 		},
-		Records:         records,
-		StateUpdates:    stateUpdates,
-		BaseState:       baseState,
-		BaseBacklogHash: baseBacklogHash,
-		BacklogUpdate:   backlogUpdate,
-		Warnings:        warnings,
+		Records:          records,
+		StateUpdates:     stateUpdates,
+		BaseState:        baseState,
+		BaseBacklogHash:  baseBacklogHash,
+		BacklogUpdateSet: backlogUpdateSet,
+		BacklogUpdate:    backlogUpdate,
+		Warnings:         warnings,
 	}
 	pendingPath, err := nextPendingPath(cfg.PendingDir, now)
 	if err != nil {
@@ -157,13 +158,15 @@ func CommitCodeAgent(pendingPath, reviewDocURL, snapshotPath string, now time.Ti
 			return CommitResult{}, fmt.Errorf("stale pending %s: state for %s changed since scan", pendingPath, path)
 		}
 	}
-	if pending.BaseBacklogHash != "" && hashRecords(state.Backlog) != pending.BaseBacklogHash {
+	if pending.BacklogUpdateSet && pending.BaseBacklogHash != "" && hashRecords(state.Backlog) != pending.BaseBacklogHash {
 		return CommitResult{}, fmt.Errorf("stale pending %s: backlog changed since scan", pendingPath)
 	}
 	for path, update := range pending.StateUpdates {
 		state.Files[path] = update
 	}
-	state.Backlog = append([]Record(nil), pending.BacklogUpdate...)
+	if pending.BacklogUpdateSet {
+		state.Backlog = append([]Record(nil), pending.BacklogUpdate...)
+	}
 	committedAt := now.UTC().Format(time.RFC3339)
 	state.UpdatedAt = committedAt
 	if err := SaveStateAtomic(pending.Config.StatePath, state); err != nil {
@@ -282,7 +285,7 @@ func expandAgentPaths(agent AgentConfig) ([]string, []Warning) {
 	var paths []string
 	var warnings []Warning
 	for _, pattern := range agent.Paths {
-		matches, err := filepath.Glob(pattern)
+		matches, err := expandPathPattern(pattern)
 		if err != nil {
 			warnings = append(warnings, Warning{Code: "INVALID_GLOB", Message: err.Error(), Path: pattern})
 			continue
@@ -312,6 +315,87 @@ func expandAgentPaths(agent AgentConfig) ([]string, []Warning) {
 	}
 	sort.Strings(paths)
 	return paths, warnings
+}
+
+func expandPathPattern(pattern string) ([]string, error) {
+	if strings.Contains(pattern, "**") {
+		return doublestarGlob(pattern)
+	}
+	return filepath.Glob(pattern)
+}
+
+func doublestarGlob(pattern string) ([]string, error) {
+	cleanPattern := filepath.Clean(pattern)
+	parts := strings.Split(cleanPattern, string(os.PathSeparator))
+	starIndex := -1
+	for i, part := range parts {
+		if part == "**" {
+			starIndex = i
+			break
+		}
+	}
+	if starIndex < 0 {
+		return filepath.Glob(pattern)
+	}
+	if hasDoubleStarInsideSegment(parts) {
+		return nil, fmt.Errorf("unsupported doublestar pattern: %s", pattern)
+	}
+
+	rootParts := parts[:starIndex]
+	root := strings.Join(rootParts, string(os.PathSeparator))
+	if filepath.IsAbs(cleanPattern) && root == "" {
+		root = string(os.PathSeparator)
+	}
+	if root == "" {
+		root = "."
+	}
+	suffix := filepath.Join(parts[starIndex+1:]...)
+	if suffix == "" {
+		suffix = "*"
+	}
+
+	var matches []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		candidate := relative
+		if !strings.Contains(suffix, string(os.PathSeparator)) {
+			candidate = filepath.Base(path)
+		}
+		matched, err := filepath.Match(suffix, candidate)
+		if err != nil {
+			return err
+		}
+		if matched {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(matches)
+	return matches, nil
+}
+
+func hasDoubleStarInsideSegment(parts []string) bool {
+	for _, part := range parts {
+		if strings.Contains(part, "**") && part != "**" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasGlobMeta(path string) bool {
