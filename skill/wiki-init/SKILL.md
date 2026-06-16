@@ -16,6 +16,48 @@ Bootstrap a project-local OpenWiki runtime.
 - `wiki/index.md` is the lightweight Routing Index.
 - `wiki/indexes/` contains Shard Indexes used for lookup and maintenance.
 
+## Runtime Discovery
+
+Use the OpenWiki CLI as the source of truth for runtime discovery. Do not reimplement the config discovery chain inside this skill.
+
+Resolve the active config:
+
+```bash
+openwiki config path --json
+```
+
+Read the runtime config:
+
+```bash
+openwiki config show --json
+```
+
+The CLI discovery order is:
+
+1. `--config` / `-c`
+2. `OPENWIKI_CONFIG`
+3. Search upward from the current working directory for `openwiki.toml`
+4. `~/.openwiki/openwiki.toml`
+
+If `config path` reports `source = "global"`, tell the user explicitly that this workflow is using the global config at `~/.openwiki/openwiki.toml`.
+
+If the user provides an explicit config path, pass it to the CLI:
+
+```bash
+openwiki --config /path/to/openwiki.toml config path --json
+openwiki --config /path/to/openwiki.toml config show --json
+```
+
+If the user provides a project directory and `<project>/openwiki.toml` exists, pass that file with `--config`. If it does not exist, run CLI discovery from that directory or ask the user for the exact config path.
+
+If the global `openwiki` command is unavailable or too old, and this is the OpenWiki repository, use the repository-built CLI from the repository root:
+
+```bash
+go run ./cmd/openwiki config path --json
+go run ./cmd/openwiki config show --json
+```
+
+If neither CLI path works, ask the user to install/update OpenWiki CLI or provide an explicit `openwiki.toml` path.
 
 ## CLI Index Command Guardrail
 
