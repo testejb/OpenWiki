@@ -55,9 +55,13 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 		}
 	}
 
-	records = filterFirstRun(records, state, initialDays, now)
+	var firstRunWarnings []Warning
+	records, firstRunWarnings = filterFirstRun(records, state, initialDays, now, fileUpdates)
+	warnings = append(warnings, firstRunWarnings...)
+	candidateRecords := append([]Record(nil), records...)
 	records = keepLatestRecords(records, maxRecords)
-	stateUpdates := stateUpdatesForPendingRecords(records, fileUpdates, now)
+	stateUpdates, stateAdvanceWarnings := stateUpdatesForPendingRecords(records, candidateRecords, fileUpdates, now)
+	warnings = append(warnings, stateAdvanceWarnings...)
 	baseState = baseStateForUpdates(baseState, stateUpdates)
 
 	pending := Pending{
@@ -296,19 +300,32 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, "*?[")
 }
 
-func filterFirstRun(records []Record, state State, initialDays int, now time.Time) []Record {
+func filterFirstRun(records []Record, state State, initialDays int, now time.Time, fileUpdates map[string]FileState) ([]Record, []Warning) {
 	if initialDays <= 0 {
-		return records
+		return records, nil
 	}
 	cutoff := now.AddDate(0, 0, -initialDays)
 	filtered := records[:0]
+	var warnings []Warning
+	warnedTimestamplessOldFiles := map[string]bool{}
 	for _, record := range records {
 		if _, known := state.Files[record.SourceFile]; known {
 			filtered = append(filtered, record)
 			continue
 		}
 		if record.Timestamp == "" {
-			filtered = append(filtered, record)
+			if fileMTimeWithinInitialWindow(record.SourceFile, fileUpdates, cutoff) {
+				filtered = append(filtered, record)
+				continue
+			}
+			if !warnedTimestamplessOldFiles[record.SourceFile] {
+				warnings = append(warnings, Warning{
+					Code:    "TIMESTAMPLESS_OLD_FILE_SKIPPED",
+					Message: "timestampless records in old source file were skipped on first run",
+					Path:    record.SourceFile,
+				})
+				warnedTimestamplessOldFiles[record.SourceFile] = true
+			}
 			continue
 		}
 		parsed, err := time.Parse(time.RFC3339, record.Timestamp)
@@ -316,7 +333,20 @@ func filterFirstRun(records []Record, state State, initialDays int, now time.Tim
 			filtered = append(filtered, record)
 		}
 	}
-	return filtered
+	return filtered, warnings
+}
+
+func fileMTimeWithinInitialWindow(path string, fileUpdates map[string]FileState, cutoff time.Time) bool {
+	if update, ok := fileUpdates[path]; ok && update.MTime != "" {
+		if parsed, err := time.Parse(time.RFC3339, update.MTime); err == nil {
+			return !parsed.Before(cutoff)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return true
+	}
+	return !info.ModTime().Before(cutoff)
 }
 
 func keepLatestRecords(records []Record, maxRecords int) []Record {
@@ -377,26 +407,80 @@ func nextPendingPath(pendingDir string, now time.Time) (string, error) {
 	return path, nil
 }
 
-func stateUpdatesForPendingRecords(records []Record, fileUpdates map[string]FileState, now time.Time) map[string]FileState {
+func stateUpdatesForPendingRecords(records, candidateRecords []Record, fileUpdates map[string]FileState, now time.Time) (map[string]FileState, []Warning) {
 	updates := map[string]FileState{}
+	var warnings []Warning
+	included := map[string]bool{}
 	for _, record := range records {
-		base, ok := fileUpdates[record.SourceFile]
+		included[recordKey(record)] = true
+	}
+	candidatesByFile := map[string][]Record{}
+	for _, record := range candidateRecords {
+		candidatesByFile[record.SourceFile] = append(candidatesByFile[record.SourceFile], record)
+	}
+	for path, candidates := range candidatesByFile {
+		base, ok := fileUpdates[path]
 		if !ok {
 			continue
 		}
-		if existing, ok := updates[record.SourceFile]; ok && existing.ProcessedBytes >= record.ByteEnd {
+		var lastContinuous *Record
+		includedAfterSkipped := false
+		for i := range candidates {
+			if included[recordKey(candidates[i])] {
+				if includedAfterSkipped {
+					continue
+				}
+				record := candidates[i]
+				lastContinuous = &record
+				continue
+			}
+			if lastContinuous != nil {
+				includedAfterSkipped = hasIncludedCandidate(candidates[i+1:], included)
+			} else {
+				includedAfterSkipped = hasIncludedCandidate(candidates[i+1:], included)
+			}
+			break
+		}
+		if lastContinuous == nil {
+			if hasIncludedCandidate(candidates, included) {
+				warnings = append(warnings, Warning{
+					Code:    "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE",
+					Message: "max_records_per_run skipped earlier records in this file; state advance was withheld to avoid permanently missing records",
+					Path:    path,
+				})
+			}
 			continue
 		}
 		update := base
-		update.ProcessedBytes = record.ByteEnd
-		update.ProcessedLines = record.LineEnd
+		update.ProcessedBytes = lastContinuous.ByteEnd
+		update.ProcessedLines = lastContinuous.LineEnd
 		update.LastScannedAt = now.UTC().Format(time.RFC3339)
-		if boundary, err := boundaryHash(record.SourceFile, record.ByteEnd); err == nil {
+		if boundary, err := boundaryHash(path, lastContinuous.ByteEnd); err == nil {
 			update.BoundaryHash = boundary
 		}
-		updates[record.SourceFile] = update
+		updates[path] = update
+		if includedAfterSkipped {
+			warnings = append(warnings, Warning{
+				Code:    "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE",
+				Message: "max_records_per_run skipped records after the continuous prefix in this file; state advanced only to the continuous prefix",
+				Path:    path,
+			})
+		}
 	}
-	return updates
+	return updates, warnings
+}
+
+func recordKey(record Record) string {
+	return fmt.Sprintf("%s\x00%d\x00%d\x00%s", record.SourceFile, record.ByteStart, record.ByteEnd, record.RecordID)
+}
+
+func hasIncludedCandidate(candidates []Record, included map[string]bool) bool {
+	for _, record := range candidates {
+		if included[recordKey(record)] {
+			return true
+		}
+	}
+	return false
 }
 
 func baseStateForUpdates(baseState map[string]FileState, stateUpdates map[string]FileState) map[string]FileState {

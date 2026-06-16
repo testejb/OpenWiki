@@ -213,7 +213,7 @@ func appendCandidateFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestScanMaxRecordsKeepsLatestRecordsAndAdvancesToLatestPendingBoundary(t *testing.T) {
+func TestScanMaxRecordsKeepsLatestButDoesNotAdvancePastSkippedEarlierRecords(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")
 	writeCandidateFile(t, historyPath,
@@ -233,12 +233,11 @@ func TestScanMaxRecordsKeepsLatestRecordsAndAdvancesToLatestPendingBoundary(t *t
 	if pending.Records[0].Text != "第二条记录" || pending.Records[1].Text != "第三条记录" {
 		t.Fatalf("expected latest two unprocessed records, got %#v", pending.Records)
 	}
-	update := pending.StateUpdates[historyPath]
-	if update.ProcessedBytes != pending.Records[1].ByteEnd {
-		t.Fatalf("expected state update bytes to stop at latest pending record %d, got %d", pending.Records[1].ByteEnd, update.ProcessedBytes)
+	if _, ok := pending.StateUpdates[historyPath]; ok {
+		t.Fatalf("expected state update to be withheld when maxRecords skipped an earlier record, got %#v", pending.StateUpdates[historyPath])
 	}
-	if update.ProcessedLines != pending.Records[1].LineEnd {
-		t.Fatalf("expected state update lines to stop at latest pending record %d, got %d", pending.Records[1].LineEnd, update.ProcessedLines)
+	if !hasWarningCode(pending.Warnings, "MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE") {
+		t.Fatalf("expected MAX_RECORDS_LIMIT_PREVENTED_STATE_ADVANCE warning, got %#v", pending.Warnings)
 	}
 
 	snapshotPath := filepath.Join(root, "snapshot.md")
@@ -247,17 +246,60 @@ func TestScanMaxRecordsKeepsLatestRecordsAndAdvancesToLatestPendingBoundary(t *t
 		t.Fatalf("CommitCodeAgent returned error: %v", err)
 	}
 	state := loadStateForTest(t, cfg.StatePath)
-	if state.Files[historyPath].ProcessedBytes != pending.Records[1].ByteEnd {
-		t.Fatalf("expected committed state to advance to latest pending record, got %#v", state.Files[historyPath])
+	if _, ok := state.Files[historyPath]; ok {
+		t.Fatalf("expected committed state not to advance the file, got %#v", state.Files[historyPath])
 	}
+}
 
-	next, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Hour), InitialDays: 30, MaxRecordsPerRun: 2})
-	if err != nil {
-		t.Fatalf("next ScanCodeAgent returned error: %v", err)
+func TestScanFirstRunSkipsTimestamplessOldFile(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":0,"text":"无时间记录"}`+"\n")
+	oldTime := fixedScanTime().AddDate(0, 0, -31)
+	if err := os.Chtimes(historyPath, oldTime, oldTime); err != nil {
+		t.Fatalf("chtimes history: %v", err)
 	}
-	nextPending := loadPendingForTest(t, next.PendingPath)
-	if len(nextPending.Records) != 0 {
-		t.Fatalf("expected next scan not to repeat records already included in pending, got %#v", nextPending.Records)
+	cfg := testCodeAgentConfig(root, historyPath)
+
+	result, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("ScanCodeAgent returned error: %v", err)
+	}
+	if result.Records.Total != 0 {
+		t.Fatalf("expected old timestampless file to produce 0 records, got %d", result.Records.Total)
+	}
+	pending := loadPendingForTest(t, result.PendingPath)
+	if len(pending.Records) != 0 {
+		t.Fatalf("expected old timestampless pending records to be empty, got %#v", pending.Records)
+	}
+	if !hasWarningCode(pending.Warnings, "TIMESTAMPLESS_OLD_FILE_SKIPPED") {
+		t.Fatalf("expected TIMESTAMPLESS_OLD_FILE_SKIPPED warning, got %#v", pending.Warnings)
+	}
+}
+
+func TestScanFirstRunIncludesTimestamplessRecentFile(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":0,"text":"无时间记录"}`+"\n")
+	recentTime := fixedScanTime().AddDate(0, 0, -1)
+	if err := os.Chtimes(historyPath, recentTime, recentTime); err != nil {
+		t.Fatalf("chtimes history: %v", err)
+	}
+	cfg := testCodeAgentConfig(root, historyPath)
+
+	result, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("ScanCodeAgent returned error: %v", err)
+	}
+	if result.Records.Total != 1 {
+		t.Fatalf("expected recent timestampless file to produce 1 record, got %d", result.Records.Total)
+	}
+	pending := loadPendingForTest(t, result.PendingPath)
+	if len(pending.Records) != 1 {
+		t.Fatalf("expected one pending record, got %#v", pending.Records)
+	}
+	if pending.Records[0].Timestamp != "" || pending.Records[0].Text != "无时间记录" {
+		t.Fatalf("expected timestampless record to be included, got %#v", pending.Records[0])
 	}
 }
 
