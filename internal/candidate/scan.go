@@ -32,6 +32,7 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 	var warnings []Warning
 	fileUpdates := map[string]FileState{}
 	baseState := map[string]FileState{}
+	resetFiles := map[string]bool{}
 
 	if cfg.Enabled {
 		for _, agent := range cfg.Agents {
@@ -42,7 +43,7 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 			warnings = append(warnings, pathWarnings...)
 			for _, path := range paths {
 				previous := state.Files[path]
-				fileRecords, update, fileWarnings, err := scanOneFile(agent, path, previous, now)
+				fileRecords, update, reset, fileWarnings, err := scanOneFile(agent, path, previous, now)
 				warnings = append(warnings, fileWarnings...)
 				if err != nil {
 					return ScanResult{}, err
@@ -51,18 +52,25 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 					fileUpdates[path] = *update
 					baseState[path] = previous
 				}
+				if reset {
+					resetFiles[path] = true
+				}
 				records = append(records, fileRecords...)
 			}
 		}
 	}
 
 	var firstRunWarnings []Warning
-	records, firstRunWarnings = filterFirstRun(records, state, initialDays, now, fileUpdates)
+	records, firstRunWarnings = filterFirstRun(records, state, initialDays, now, fileUpdates, resetFiles)
 	warnings = append(warnings, firstRunWarnings...)
 	baseBacklogHash := hashRecords(state.Backlog)
-	records = mergeRecords(state.Backlog, records)
 	var backlogUpdate []Record
-	records, backlogUpdate = keepLatestRecords(records, maxRecords)
+	if cfg.Enabled {
+		records = mergeRecords(state.Backlog, records)
+		records, backlogUpdate = keepLatestRecords(records, maxRecords)
+	} else {
+		backlogUpdate = append([]Record(nil), state.Backlog...)
+	}
 	stateUpdates := appendAllFileUpdates(fileUpdates)
 	baseState = baseStateForUpdates(baseState, stateUpdates)
 
@@ -201,32 +209,34 @@ func StatusCodeAgent(cfg CodeAgentConfig) (StatusResult, error) {
 	}, nil
 }
 
-func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Time) ([]Record, *FileState, []Warning, error) {
+func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Time) ([]Record, *FileState, bool, []Warning, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, false, nil, err
 	}
 	currentFileID := fileID(info)
 	currentTailHash, err := tailHash(path)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, false, nil, err
 	}
 
 	startByte := int64(0)
 	startLine := 0
+	reset := false
 	var warnings []Warning
 	if previous.FileID != "" {
 		boundaryTrusted, err := processedBoundaryMatches(path, previous)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, false, nil, err
 		}
 		switch {
 		case previous.FileID == currentFileID && info.Size() == previous.ProcessedBytes && previous.TailHash == currentTailHash && boundaryTrusted:
-			return nil, nil, nil, nil
+			return nil, nil, false, nil, nil
 		case previous.FileID == currentFileID && info.Size() > previous.ProcessedBytes && boundaryTrusted:
 			startByte = previous.ProcessedBytes
 			startLine = previous.ProcessedLines
 		default:
+			reset = true
 			warnings = append(warnings, Warning{Code: "SOURCE_FILE_RESET", Message: "source file was truncated, replaced, or rewritten; scanning from start", Path: path})
 		}
 	}
@@ -234,11 +244,11 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 	records, parseWarnings, err := ParseJSONLFile(agent, path, startByte, startLine)
 	warnings = append(warnings, parseWarnings...)
 	if err != nil {
-		return nil, nil, warnings, err
+		return nil, nil, reset, warnings, err
 	}
 	lineCount, err := countLines(path)
 	if err != nil {
-		return nil, nil, warnings, err
+		return nil, nil, reset, warnings, err
 	}
 	mtime := info.ModTime().UTC().Format(time.RFC3339)
 	lastScannedAt := now.UTC().Format(time.RFC3339)
@@ -254,7 +264,7 @@ func scanOneFile(agent AgentConfig, path string, previous FileState, now time.Ti
 		BoundaryHash:   mustBoundaryHash(path, info.Size()),
 		LastScannedAt:  lastScannedAt,
 	}
-	return records, &update, warnings, nil
+	return records, &update, reset, warnings, nil
 }
 
 func choosePositive(override, configured, fallback int) int {
@@ -308,7 +318,7 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, "*?[")
 }
 
-func filterFirstRun(records []Record, state State, initialDays int, now time.Time, fileUpdates map[string]FileState) ([]Record, []Warning) {
+func filterFirstRun(records []Record, state State, initialDays int, now time.Time, fileUpdates map[string]FileState, resetFiles map[string]bool) ([]Record, []Warning) {
 	if initialDays <= 0 {
 		return records, nil
 	}
@@ -317,7 +327,7 @@ func filterFirstRun(records []Record, state State, initialDays int, now time.Tim
 	var warnings []Warning
 	warnedTimestamplessOldFiles := map[string]bool{}
 	for _, record := range records {
-		if _, known := state.Files[record.SourceFile]; known {
+		if _, known := state.Files[record.SourceFile]; known && !resetFiles[record.SourceFile] {
 			filtered = append(filtered, record)
 			continue
 		}

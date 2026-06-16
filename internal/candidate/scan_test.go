@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -136,6 +137,100 @@ func TestScanAppendUsesProcessedBytes(t *testing.T) {
 	newBytes := pending.StateUpdates[historyPath].ProcessedBytes
 	if newBytes <= oldBytes {
 		t.Errorf("expected pending state update to advance bytes beyond %d, got %d", oldBytes, newBytes)
+	}
+}
+
+func TestScanResetAppliesInitialDaysFilter(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath, `{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	if _, err := candidate.CommitCodeAgent(first.PendingPath, "https://example.com/review-1", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("first CommitCodeAgent returned error: %v", err)
+	}
+
+	oldRecordTime := fixedScanTime().AddDate(0, 0, -31)
+	writeCandidateFile(t, historyPath, `{"session_id":"old","ts":`+strconv.FormatInt(oldRecordTime.Unix(), 10)+`,"text":"旧时间记录"}`+"\n")
+	if err := os.Chtimes(historyPath, fixedScanTime(), fixedScanTime()); err != nil {
+		t.Fatalf("chtimes history: %v", err)
+	}
+
+	second, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 10})
+	if err != nil {
+		t.Fatalf("second ScanCodeAgent returned error: %v", err)
+	}
+	if second.Records.Total != 0 {
+		t.Fatalf("expected reset scan to filter old records, got %d", second.Records.Total)
+	}
+	pending := loadPendingForTest(t, second.PendingPath)
+	if len(pending.Records) != 0 {
+		t.Fatalf("expected reset pending records to be empty, got %#v", pending.Records)
+	}
+	if len(pending.BacklogUpdate) != 0 {
+		t.Fatalf("expected reset old records not to enter backlog, got %#v", pending.BacklogUpdate)
+	}
+	if !hasWarningCode(pending.Warnings, "SOURCE_FILE_RESET") {
+		t.Fatalf("expected SOURCE_FILE_RESET warning, got %#v", pending.Warnings)
+	}
+}
+
+func TestScanDisabledDoesNotExposeBacklog(t *testing.T) {
+	root := t.TempDir()
+	historyPath := filepath.Join(root, "history.jsonl")
+	writeCandidateFile(t, historyPath,
+		`{"session_id":"s1","ts":1781597600,"text":"第一条记录"}`+"\n"+
+			`{"session_id":"s2","ts":1781597660,"text":"第二条记录"}`+"\n"+
+			`{"session_id":"s3","ts":1781597720,"text":"第三条记录"}`+"\n")
+	cfg := testCodeAgentConfig(root, historyPath)
+	snapshotPath := filepath.Join(root, "snapshot.md")
+	writeCandidateFile(t, snapshotPath, "# snapshot\n")
+
+	first, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime(), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("first ScanCodeAgent returned error: %v", err)
+	}
+	if _, err := candidate.CommitCodeAgent(first.PendingPath, "https://example.com/review-1", snapshotPath, fixedCommitTime()); err != nil {
+		t.Fatalf("first CommitCodeAgent returned error: %v", err)
+	}
+	stateBefore := loadStateForTest(t, cfg.StatePath)
+	if len(stateBefore.Backlog) == 0 {
+		t.Fatalf("test setup expected backlog, got %#v", stateBefore.Backlog)
+	}
+
+	cfg.Enabled = false
+	disabled, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Minute), InitialDays: 30, MaxRecordsPerRun: 2})
+	if err != nil {
+		t.Fatalf("disabled ScanCodeAgent returned error: %v", err)
+	}
+	if disabled.Records.Total != 0 {
+		t.Fatalf("expected disabled scan to expose 0 records, got %d", disabled.Records.Total)
+	}
+	pending := loadPendingForTest(t, disabled.PendingPath)
+	if len(pending.Records) != 0 {
+		t.Fatalf("expected disabled pending records to be empty, got %#v", pending.Records)
+	}
+	if len(pending.BacklogUpdate) != len(stateBefore.Backlog) {
+		t.Fatalf("expected disabled pending backlog update to retain existing backlog, got %#v want %#v", pending.BacklogUpdate, stateBefore.Backlog)
+	}
+
+	if _, err := candidate.CommitCodeAgent(disabled.PendingPath, "https://example.com/review-disabled", snapshotPath, fixedCommitTime().Add(time.Minute)); err != nil {
+		t.Fatalf("disabled CommitCodeAgent returned error: %v", err)
+	}
+	stateAfter := loadStateForTest(t, cfg.StatePath)
+	if len(stateAfter.Backlog) != len(stateBefore.Backlog) {
+		t.Fatalf("expected disabled commit not to clear backlog, got %#v want %#v", stateAfter.Backlog, stateBefore.Backlog)
+	}
+	for i := range stateBefore.Backlog {
+		if stateAfter.Backlog[i].Text != stateBefore.Backlog[i].Text {
+			t.Fatalf("expected disabled commit to preserve backlog, got %#v want %#v", stateAfter.Backlog, stateBefore.Backlog)
+		}
 	}
 }
 
