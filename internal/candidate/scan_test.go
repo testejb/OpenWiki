@@ -213,7 +213,7 @@ func appendCandidateFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestScanMaxRecordsDoesNotAdvancePastPendingRecords(t *testing.T) {
+func TestScanMaxRecordsKeepsLatestRecordsAndAdvancesToLatestPendingBoundary(t *testing.T) {
 	root := t.TempDir()
 	historyPath := filepath.Join(root, "history.jsonl")
 	writeCandidateFile(t, historyPath,
@@ -230,15 +230,15 @@ func TestScanMaxRecordsDoesNotAdvancePastPendingRecords(t *testing.T) {
 	if len(pending.Records) != 2 {
 		t.Fatalf("expected maxRecords to keep 2 records, got %d", len(pending.Records))
 	}
-	if pending.Records[0].Text != "第一条记录" || pending.Records[1].Text != "第二条记录" {
-		t.Fatalf("expected first two unprocessed records, got %#v", pending.Records)
+	if pending.Records[0].Text != "第二条记录" || pending.Records[1].Text != "第三条记录" {
+		t.Fatalf("expected latest two unprocessed records, got %#v", pending.Records)
 	}
 	update := pending.StateUpdates[historyPath]
 	if update.ProcessedBytes != pending.Records[1].ByteEnd {
-		t.Fatalf("expected state update bytes to stop at pending last record %d, got %d", pending.Records[1].ByteEnd, update.ProcessedBytes)
+		t.Fatalf("expected state update bytes to stop at latest pending record %d, got %d", pending.Records[1].ByteEnd, update.ProcessedBytes)
 	}
 	if update.ProcessedLines != pending.Records[1].LineEnd {
-		t.Fatalf("expected state update lines to stop at pending last record %d, got %d", pending.Records[1].LineEnd, update.ProcessedLines)
+		t.Fatalf("expected state update lines to stop at latest pending record %d, got %d", pending.Records[1].LineEnd, update.ProcessedLines)
 	}
 
 	snapshotPath := filepath.Join(root, "snapshot.md")
@@ -248,7 +248,7 @@ func TestScanMaxRecordsDoesNotAdvancePastPendingRecords(t *testing.T) {
 	}
 	state := loadStateForTest(t, cfg.StatePath)
 	if state.Files[historyPath].ProcessedBytes != pending.Records[1].ByteEnd {
-		t.Fatalf("expected committed state not to advance past pending records, got %#v", state.Files[historyPath])
+		t.Fatalf("expected committed state to advance to latest pending record, got %#v", state.Files[historyPath])
 	}
 
 	next, err := candidate.ScanCodeAgent(cfg, candidate.ScanOptions{Now: fixedScanTime().Add(time.Hour), InitialDays: 30, MaxRecordsPerRun: 2})
@@ -256,8 +256,8 @@ func TestScanMaxRecordsDoesNotAdvancePastPendingRecords(t *testing.T) {
 		t.Fatalf("next ScanCodeAgent returned error: %v", err)
 	}
 	nextPending := loadPendingForTest(t, next.PendingPath)
-	if len(nextPending.Records) != 1 || nextPending.Records[0].Text != "第三条记录" {
-		t.Fatalf("expected next scan to return third record, got %#v", nextPending.Records)
+	if len(nextPending.Records) != 0 {
+		t.Fatalf("expected next scan not to repeat records already included in pending, got %#v", nextPending.Records)
 	}
 }
 

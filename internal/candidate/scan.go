@@ -56,7 +56,7 @@ func ScanCodeAgent(cfg CodeAgentConfig, opts ScanOptions) (ScanResult, error) {
 	}
 
 	records = filterFirstRun(records, state, initialDays, now)
-	records = keepFirstRecords(records, maxRecords)
+	records = keepLatestRecords(records, maxRecords)
 	stateUpdates := stateUpdatesForPendingRecords(records, fileUpdates, now)
 	baseState = baseStateForUpdates(baseState, stateUpdates)
 
@@ -319,20 +319,45 @@ func filterFirstRun(records []Record, state State, initialDays int, now time.Tim
 	return filtered
 }
 
-func keepFirstRecords(records []Record, maxRecords int) []Record {
+func keepLatestRecords(records []Record, maxRecords int) []Record {
 	if maxRecords <= 0 || len(records) <= maxRecords {
 		return records
 	}
-	return append([]Record(nil), records[:maxRecords]...)
+	ordered := append([]Record(nil), records...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return recordLess(ordered[i], ordered[j])
+	})
+	return append([]Record(nil), ordered[len(ordered)-maxRecords:]...)
 }
 
-func recordSortKey(record Record) time.Time {
+func recordLess(left, right Record) bool {
+	leftTime, leftOK := recordTimestamp(left)
+	rightTime, rightOK := recordTimestamp(right)
+	if leftOK && rightOK && !leftTime.Equal(rightTime) {
+		return leftTime.Before(rightTime)
+	}
+	if leftOK != rightOK {
+		return !leftOK
+	}
+	if left.SourceFile != right.SourceFile {
+		return left.SourceFile < right.SourceFile
+	}
+	if left.LineStart != right.LineStart {
+		return left.LineStart < right.LineStart
+	}
+	if left.ByteStart != right.ByteStart {
+		return left.ByteStart < right.ByteStart
+	}
+	return left.RecordID < right.RecordID
+}
+
+func recordTimestamp(record Record) (time.Time, bool) {
 	if record.Timestamp != "" {
 		if parsed, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
-			return parsed
+			return parsed, true
 		}
 	}
-	return time.Unix(0, record.ByteEnd)
+	return time.Time{}, false
 }
 
 func nextPendingPath(pendingDir string, now time.Time) (string, error) {
@@ -357,6 +382,9 @@ func stateUpdatesForPendingRecords(records []Record, fileUpdates map[string]File
 	for _, record := range records {
 		base, ok := fileUpdates[record.SourceFile]
 		if !ok {
+			continue
+		}
+		if existing, ok := updates[record.SourceFile]; ok && existing.ProcessedBytes >= record.ByteEnd {
 			continue
 		}
 		update := base
