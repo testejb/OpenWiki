@@ -216,13 +216,19 @@ secondary_language = "en"
 func TestLoadCandidateConfig(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := filepath.Join(dir, "openwiki.toml")
-	content := `wiki_root = "/Users/me/wiki"
+	content := `wiki_root = "./wiki-root"
 
 [candidate]
 state_dir = "candidate-state"
+run_log_path = "candidate/run.log"
+snapshot_dir = "candidate/reviews"
 
 [candidate.codeagent]
 enabled = true
+state_path = "codeagent/state.json"
+pending_dir = "codeagent/pending"
+run_log_path = "codeagent/run.log"
+snapshot_dir = "codeagent/reviews"
 initial_days = 7
 max_records_per_run = 200
 
@@ -244,8 +250,26 @@ enabled = true
 	if cfg.Candidate.StateDir != "candidate-state" {
 		t.Errorf("expected candidate state_dir=candidate-state, got %s", cfg.Candidate.StateDir)
 	}
+	if cfg.Candidate.RunLogPath != "candidate/run.log" {
+		t.Errorf("expected candidate run_log_path=candidate/run.log, got %s", cfg.Candidate.RunLogPath)
+	}
+	if cfg.Candidate.SnapshotDir != "candidate/reviews" {
+		t.Errorf("expected candidate snapshot_dir=candidate/reviews, got %s", cfg.Candidate.SnapshotDir)
+	}
 	if !cfg.Candidate.CodeAgent.Enabled {
 		t.Errorf("expected candidate codeagent enabled=true")
+	}
+	if cfg.Candidate.CodeAgent.StatePath != "codeagent/state.json" {
+		t.Errorf("expected codeagent state_path=codeagent/state.json, got %s", cfg.Candidate.CodeAgent.StatePath)
+	}
+	if cfg.Candidate.CodeAgent.PendingDir != "codeagent/pending" {
+		t.Errorf("expected codeagent pending_dir=codeagent/pending, got %s", cfg.Candidate.CodeAgent.PendingDir)
+	}
+	if cfg.Candidate.CodeAgent.RunLogPath != "codeagent/run.log" {
+		t.Errorf("expected codeagent run_log_path=codeagent/run.log, got %s", cfg.Candidate.CodeAgent.RunLogPath)
+	}
+	if cfg.Candidate.CodeAgent.SnapshotDir != "codeagent/reviews" {
+		t.Errorf("expected codeagent snapshot_dir=codeagent/reviews, got %s", cfg.Candidate.CodeAgent.SnapshotDir)
 	}
 	if cfg.Candidate.CodeAgent.InitialDays != 7 {
 		t.Errorf("expected initial_days=7, got %d", cfg.Candidate.CodeAgent.InitialDays)

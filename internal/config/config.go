@@ -36,8 +36,10 @@ type RemoteConfig struct {
 }
 
 type CandidateConfig struct {
-	StateDir  string                   `toml:"state_dir"`
-	CodeAgent CandidateCodeAgentConfig `toml:"codeagent"`
+	StateDir    string                   `toml:"state_dir"`
+	RunLogPath  string                   `toml:"run_log_path"`
+	SnapshotDir string                   `toml:"snapshot_dir"`
+	CodeAgent   CandidateCodeAgentConfig `toml:"codeagent"`
 }
 
 type CandidateCodeAgentConfig struct {
