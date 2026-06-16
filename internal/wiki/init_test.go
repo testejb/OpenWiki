@@ -61,12 +61,7 @@ func TestInitCreatesLayeredIndexLayout(t *testing.T) {
 	if !strings.Contains(index, "## 检索路由") {
 		t.Fatalf("expected routing index to contain 检索路由, got:\n%s", index)
 	}
-	if !strings.Contains(index, "indexes/scopes.md") {
-		t.Fatalf("expected routing index to mention indexes/scopes.md, got:\n%s", index)
-	}
-	if !strings.Contains(index, "indexes/hot.md") {
-		t.Fatalf("expected routing index to mention indexes/hot.md, got:\n%s", index)
-	}
+	assertShardIndexLinksUseWikiLinks(t, index)
 	if strings.Contains(index, "| Slug | 标题 | 类型 | 标签 | 适用范围 | 最后更新 |") {
 		t.Fatalf("routing index must not use the old full page table template")
 	}
@@ -77,5 +72,35 @@ func TestInitCreatesLayeredIndexLayout(t *testing.T) {
 	}
 	if len(queryUsageBytes) != 0 {
 		t.Fatalf("expected query-usage.jsonl to be empty, got %q", string(queryUsageBytes))
+	}
+}
+
+func assertShardIndexLinksUseWikiLinks(t *testing.T, index string) {
+	t.Helper()
+
+	for _, link := range []string{
+		"[[indexes/scopes]]",
+		"[[indexes/entities]]",
+		"[[indexes/concepts]]",
+		"[[indexes/tags]]",
+		"[[indexes/recent]]",
+		"[[indexes/hot]]",
+	} {
+		if !strings.Contains(index, link) {
+			t.Fatalf("expected routing index to contain shard wiki link %s, got:\n%s", link, index)
+		}
+	}
+
+	for _, oldRef := range []string{
+		"`indexes/scopes.md`",
+		"`indexes/entities.md`",
+		"`indexes/concepts.md`",
+		"`indexes/tags.md`",
+		"`indexes/recent.md`",
+		"`indexes/hot.md`",
+	} {
+		if strings.Contains(index, oldRef) {
+			t.Fatalf("expected routing index not to contain old shard path reference %s, got:\n%s", oldRef, index)
+		}
 	}
 }
