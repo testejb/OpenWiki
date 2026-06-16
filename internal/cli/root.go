@@ -88,6 +88,8 @@ func RunWithIO(args []string, version, buildTime string, stdout, stderr io.Write
 		return runLog(stdout, stderr, &opts, subArgs)
 	case "sync":
 		return runSync(stdout, stderr, &opts, subArgs)
+	case "candidate":
+		return runCandidate(stdout, stderr, &opts, subArgs)
 	default:
 		return fmt.Errorf("未知命令: %s\n使用 'openwiki --help' 查看可用命令", subcommand)
 	}
@@ -117,6 +119,7 @@ func printHelp(w io.Writer) {
   index    检查和重建分层索引
   log      查看操作日志
   sync     同步到云端
+  candidate 管理候选内容
 
 使用 'openwiki <命令> --help' 查看命令详情
 `)
