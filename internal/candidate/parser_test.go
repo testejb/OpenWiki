@@ -256,6 +256,69 @@ func TestParseJSONLFileTruncatesMalformedJSONWarnings(t *testing.T) {
 	}
 }
 
+func TestParseTraexHistoryJSONLSkipsBlankText(t *testing.T) {
+	path := writeJSONL(t, "history-blank-text.jsonl",
+		`{"session_id":"s1","ts":1781597600,"text":""}`,
+		`{"session_id":"s2","ts":1781597660,"text":"   "}`,
+		`{"session_id":"s3","ts":1781597720,"text":"有效记录"}`,
+	)
+	agent := candidate.AgentConfig{Name: "traex", Type: "traex-history"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected blank text to produce no warnings, got %#v", warnings)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected only valid text record, got %d: %#v", len(records), records)
+	}
+	if records[0].SessionID != "s3" {
+		t.Errorf("expected valid record session_id s3, got %q", records[0].SessionID)
+	}
+	if records[0].Text != "有效记录" {
+		t.Errorf("expected valid record text, got %q", records[0].Text)
+	}
+	if records[0].LineStart != 3 {
+		t.Errorf("expected valid record to keep original line 3, got %d", records[0].LineStart)
+	}
+}
+
+func TestParseTraeIDEMemoryJSONLSkipsBlankSummary(t *testing.T) {
+	path := writeJSONL(t, "session_memory_blank_summary.jsonl",
+		`{"intent":"","actions":[],"outcome":"","learned":[],"message_summary_time":"2026-06-04 14:29:35","message_id":"m1"}`,
+		`{"intent":"   ","actions":[],"outcome":"  ","learned":[],"message_summary_time":"2026-06-04 14:29:35","message_id":"m2"}`,
+		`{"intent":"记录经验","actions":["整理"],"outcome":"完成","learned":["空摘要跳过"],"message_summary_time":"2026-06-04 14:29:35","message_id":"m3"}`,
+	)
+	agent := candidate.AgentConfig{Name: "trae-ide", Type: "trae-ide-memory"}
+
+	records, warnings, err := candidate.ParseJSONLFile(agent, path, 0, 0)
+
+	if err != nil {
+		t.Fatalf("ParseJSONLFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected blank summaries to produce no warnings, got %#v", warnings)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected only valid summary record, got %d: %#v", len(records), records)
+	}
+	if records[0].MessageID != "m3" {
+		t.Errorf("expected valid record message_id m3, got %q", records[0].MessageID)
+	}
+	if records[0].Intent != "记录经验" {
+		t.Errorf("expected valid record intent, got %q", records[0].Intent)
+	}
+	if !strings.Contains(records[0].Text, "记录经验") || !strings.Contains(records[0].Text, "完成") {
+		t.Errorf("expected valid record text to contain intent and outcome, got %q", records[0].Text)
+	}
+	if records[0].LineStart != 3 {
+		t.Errorf("expected valid record to keep original line 3, got %d", records[0].LineStart)
+	}
+}
+
 func writeJSONL(t *testing.T, name string, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
