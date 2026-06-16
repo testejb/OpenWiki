@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	WikiRoot string       `toml:"wiki_root"`
-	Wiki     WikiConfig   `toml:"wiki"`
-	Remote   RemoteConfig `toml:"remote"`
+	WikiRoot  string          `toml:"wiki_root"`
+	Wiki      WikiConfig      `toml:"wiki"`
+	Remote    RemoteConfig    `toml:"remote"`
+	Candidate CandidateConfig `toml:"candidate"`
 }
 
 type WikiConfig struct {
@@ -34,6 +35,31 @@ type RemoteConfig struct {
 	AutoSync bool   `toml:"auto_sync"`
 }
 
+type CandidateConfig struct {
+	StateDir  string                   `toml:"state_dir"`
+	CodeAgent CandidateCodeAgentConfig `toml:"codeagent"`
+}
+
+type CandidateCodeAgentConfig struct {
+	Enabled          bool                   `toml:"enabled"`
+	StatePath        string                 `toml:"state_path"`
+	PendingDir       string                 `toml:"pending_dir"`
+	RunLogPath       string                 `toml:"run_log_path"`
+	SnapshotDir      string                 `toml:"snapshot_dir"`
+	InitialDays      int                    `toml:"initial_days"`
+	MaxRecordsPerRun int                    `toml:"max_records_per_run"`
+	Agents           []CandidateAgentConfig `toml:"agents"`
+	Configured       bool                   `toml:"-"`
+	EnabledSet       bool                   `toml:"-"`
+}
+
+type CandidateAgentConfig struct {
+	Name    string   `toml:"name"`
+	Type    string   `toml:"type"`
+	Paths   []string `toml:"paths"`
+	Enabled bool     `toml:"enabled"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -41,9 +67,12 @@ func Load(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	metadata, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("解析 TOML 配置失败: %w", err)
 	}
+	cfg.Candidate.CodeAgent.Configured = metadata.IsDefined("candidate", "codeagent")
+	cfg.Candidate.CodeAgent.EnabledSet = metadata.IsDefined("candidate", "codeagent", "enabled")
 	if cfg.WikiRoot != "" && !filepath.IsAbs(cfg.WikiRoot) {
 		cfg.WikiRoot = filepath.Clean(filepath.Join(filepath.Dir(path), cfg.WikiRoot))
 	}

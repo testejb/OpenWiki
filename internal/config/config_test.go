@@ -212,3 +212,61 @@ secondary_language = "en"
 		t.Fatal("expected error for unknown field, got nil")
 	}
 }
+
+func TestLoadCandidateConfig(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "/Users/me/wiki"
+
+[candidate]
+state_dir = "candidate-state"
+
+[candidate.codeagent]
+enabled = true
+initial_days = 7
+max_records_per_run = 200
+
+[[candidate.codeagent.agents]]
+name = "traex-work"
+type = "traex-history"
+paths = ["/tmp/history.jsonl"]
+enabled = true
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	cfg, err := config.Load(tomlPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Candidate.StateDir != "candidate-state" {
+		t.Errorf("expected candidate state_dir=candidate-state, got %s", cfg.Candidate.StateDir)
+	}
+	if !cfg.Candidate.CodeAgent.Enabled {
+		t.Errorf("expected candidate codeagent enabled=true")
+	}
+	if cfg.Candidate.CodeAgent.InitialDays != 7 {
+		t.Errorf("expected initial_days=7, got %d", cfg.Candidate.CodeAgent.InitialDays)
+	}
+	if cfg.Candidate.CodeAgent.MaxRecordsPerRun != 200 {
+		t.Errorf("expected max_records_per_run=200, got %d", cfg.Candidate.CodeAgent.MaxRecordsPerRun)
+	}
+	if len(cfg.Candidate.CodeAgent.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(cfg.Candidate.CodeAgent.Agents))
+	}
+	agent := cfg.Candidate.CodeAgent.Agents[0]
+	if agent.Name != "traex-work" {
+		t.Errorf("expected agent name=traex-work, got %s", agent.Name)
+	}
+	if agent.Type != "traex-history" {
+		t.Errorf("expected agent type=traex-history, got %s", agent.Type)
+	}
+	if len(agent.Paths) != 1 || agent.Paths[0] != "/tmp/history.jsonl" {
+		t.Errorf("expected agent paths=[/tmp/history.jsonl], got %#v", agent.Paths)
+	}
+	if !agent.Enabled {
+		t.Errorf("expected agent enabled=true")
+	}
+}
