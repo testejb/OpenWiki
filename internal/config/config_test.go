@@ -161,6 +161,80 @@ secondary_language = "en"
 	}
 }
 
+func TestSetNestedFieldDoesNotCreateMissingCandidateConfig(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	_, _, err := config.Set(tomlPath, "wiki.primary_language", "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("failed to read test toml: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "[candidate]") {
+		t.Errorf("expected file not to create [candidate], got:\n%s", output)
+	}
+	if strings.Contains(output, "[candidate.codeagent]") {
+		t.Errorf("expected file not to create [candidate.codeagent], got:\n%s", output)
+	}
+	if strings.Contains(output, "enabled = false") {
+		t.Errorf("expected file not to create enabled=false, got:\n%s", output)
+	}
+}
+
+func TestSetNestedFieldPreservesMissingCandidateCodeAgentEnabled(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./openwiki"
+
+[wiki]
+primary_language = "zh"
+secondary_language = "en"
+
+[candidate]
+state_dir = "candidate-state"
+
+[candidate.codeagent]
+state_path = "state.json"
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	_, _, err := config.Set(tomlPath, "wiki.primary_language", "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("failed to read test toml: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, "[candidate]") {
+		t.Errorf("expected file to preserve [candidate], got:\n%s", output)
+	}
+	if !strings.Contains(output, "[candidate.codeagent]") {
+		t.Errorf("expected file to preserve [candidate.codeagent], got:\n%s", output)
+	}
+	if strings.Contains(output, "enabled = false") {
+		t.Errorf("expected file not to create enabled=false, got:\n%s", output)
+	}
+}
+
 func TestSetTopLevelField(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := filepath.Join(dir, "openwiki.toml")
@@ -210,5 +284,87 @@ secondary_language = "en"
 	_, _, err := config.Set(tomlPath, "nonexistent.field", "value")
 	if err == nil {
 		t.Fatal("expected error for unknown field, got nil")
+	}
+}
+
+func TestLoadCandidateConfig(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "openwiki.toml")
+	content := `wiki_root = "./wiki-root"
+
+[candidate]
+state_dir = "candidate-state"
+run_log_path = "candidate/run.log"
+snapshot_dir = "candidate/reviews"
+
+[candidate.codeagent]
+enabled = true
+state_path = "codeagent/state.json"
+pending_dir = "codeagent/pending"
+run_log_path = "codeagent/run.log"
+snapshot_dir = "codeagent/reviews"
+initial_days = 7
+max_records_per_run = 200
+
+[[candidate.codeagent.agents]]
+name = "traex-work"
+type = "traex-history"
+paths = ["/tmp/history.jsonl"]
+enabled = true
+`
+	if err := os.WriteFile(tomlPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test toml: %v", err)
+	}
+
+	cfg, err := config.Load(tomlPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Candidate.StateDir != "candidate-state" {
+		t.Errorf("expected candidate state_dir=candidate-state, got %s", cfg.Candidate.StateDir)
+	}
+	if cfg.Candidate.RunLogPath != "candidate/run.log" {
+		t.Errorf("expected candidate run_log_path=candidate/run.log, got %s", cfg.Candidate.RunLogPath)
+	}
+	if cfg.Candidate.SnapshotDir != "candidate/reviews" {
+		t.Errorf("expected candidate snapshot_dir=candidate/reviews, got %s", cfg.Candidate.SnapshotDir)
+	}
+	if !cfg.Candidate.CodeAgent.Enabled {
+		t.Errorf("expected candidate codeagent enabled=true")
+	}
+	if cfg.Candidate.CodeAgent.StatePath != "codeagent/state.json" {
+		t.Errorf("expected codeagent state_path=codeagent/state.json, got %s", cfg.Candidate.CodeAgent.StatePath)
+	}
+	if cfg.Candidate.CodeAgent.PendingDir != "codeagent/pending" {
+		t.Errorf("expected codeagent pending_dir=codeagent/pending, got %s", cfg.Candidate.CodeAgent.PendingDir)
+	}
+	if cfg.Candidate.CodeAgent.RunLogPath != "codeagent/run.log" {
+		t.Errorf("expected codeagent run_log_path=codeagent/run.log, got %s", cfg.Candidate.CodeAgent.RunLogPath)
+	}
+	if cfg.Candidate.CodeAgent.SnapshotDir != "codeagent/reviews" {
+		t.Errorf("expected codeagent snapshot_dir=codeagent/reviews, got %s", cfg.Candidate.CodeAgent.SnapshotDir)
+	}
+	if cfg.Candidate.CodeAgent.InitialDays != 7 {
+		t.Errorf("expected initial_days=7, got %d", cfg.Candidate.CodeAgent.InitialDays)
+	}
+	if cfg.Candidate.CodeAgent.MaxRecordsPerRun != 200 {
+		t.Errorf("expected max_records_per_run=200, got %d", cfg.Candidate.CodeAgent.MaxRecordsPerRun)
+	}
+	if len(cfg.Candidate.CodeAgent.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(cfg.Candidate.CodeAgent.Agents))
+	}
+	agent := cfg.Candidate.CodeAgent.Agents[0]
+	if agent.Name != "traex-work" {
+		t.Errorf("expected agent name=traex-work, got %s", agent.Name)
+	}
+	if agent.Type != "traex-history" {
+		t.Errorf("expected agent type=traex-history, got %s", agent.Type)
+	}
+	if len(agent.Paths) != 1 || agent.Paths[0] != "/tmp/history.jsonl" {
+		t.Errorf("expected agent paths=[/tmp/history.jsonl], got %#v", agent.Paths)
+	}
+	if !agent.Enabled {
+		t.Errorf("expected agent enabled=true")
 	}
 }

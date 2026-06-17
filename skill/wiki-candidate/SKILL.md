@@ -1,0 +1,124 @@
+---
+name: wiki-candidate
+description: Use when discovering candidate knowledge for OpenWiki review before ingest, especially from code agent sessions, conversation history, or agent memory files.
+---
+# Wiki Candidate
+
+Discover candidate knowledge for human review before OpenWiki ingest. This skill creates review material only; it never writes accepted knowledge into formal wiki pages.
+
+## Runtime Contract
+
+- Use `openwiki.toml` as the runtime contract.
+- Use the OpenWiki CLI candidate commands as the source of truth. Do not scan codeagent files manually. Do not manually scan CodeAgent, conversation history, agent memory files, or other codeagent files.
+- Candidate files are stored under `<wiki_root>/candidate/` by default.
+- This skill only creates review material for later admission. It does not formally write `wiki/pages/`, `entities/`, `concepts/`, shard indexes, or `wiki/log.md` as accepted wiki knowledge.
+
+## Preconditions
+
+Resolve the active config before candidate discovery:
+
+```bash
+openwiki config path --json
+openwiki config show --json
+```
+
+If the user provides an explicit config path, pass it to all OpenWiki CLI calls:
+
+```bash
+openwiki --config /path/to/openwiki.toml config path --json
+openwiki --config /path/to/openwiki.toml config show --json
+```
+
+If the global `openwiki` command is unavailable or too old, and this is the OpenWiki repository, fall back from the OpenWiki repo root:
+
+```bash
+go run ./cmd/openwiki config path --json
+go run ./cmd/openwiki config show --json
+```
+
+Use the same global CLI or `go run ./cmd/openwiki ...` form consistently for candidate commands. When an explicit config is known, include `--config /path/to/openwiki.toml`.
+
+If both the global CLI and `go run ./cmd/openwiki ...` fallback are unavailable, ask the user to install or update the OpenWiki CLI, or provide an explicit `openwiki.toml` path. Do not continue with manual path guessing or manual codeagent file scanning.
+
+## CodeAgent Candidate Flow
+
+1. Run the scan command. Include `--config` when a config path is known:
+
+   ```bash
+   openwiki candidate codeagent scan --json
+   openwiki --config /path/to/openwiki.toml candidate codeagent scan --json
+   ```
+
+2. Read the returned `pending` path or identifier. Inspect the pending candidate payload produced by the CLI, not raw codeagent source files.
+3. If the scan returns zero records, stop. Report that no candidate review material was created.
+4. Read `references/codeagent-extraction-rules.md`.
+5. Extract balanced-recall candidates from the pending records. Each candidate must include exactly the planned review fields:
+   - `candidate_id`
+   - `slug`
+   - `title`
+   - `category`
+   - `target_wiki_area`
+   - `reason`
+   - `proposed_content`
+   - `evidence`
+   - `risk_and_redaction`
+   - `original_links`
+
+   Preserve ordinary external URLs and Feishu URLs exactly in `original_links`. If a URL contains sensitive query values such as token/key/signature/auth/password/secret/cookie/session, redact only the sensitive parameter values and explain it in `risk_and_redaction`.
+6. Read `references/review-doc-protocol.md`.
+7. Use `lark-doc` v2 to create a Feishu review document following the protocol. The document must contain the fixed title, protocol block, review instructions, overview, category sections, and reviewable candidate cards.
+8. Save a snapshot of the created review material into the configured `snapshot_dir` or the snapshot directory returned by the CLI. The snapshot must be enough to reconstruct what was sent to Feishu and must include:
+   - review doc URL;
+   - pending path;
+   - protocol version `OPENWIKI_CANDIDATE_REVIEW_DOC v1`;
+   - created time;
+   - all candidates with their planned fields.
+9. Only after both the Feishu review document and local snapshot are successfully created, commit the pending scan:
+
+   ```bash
+   openwiki candidate codeagent commit --pending <pending> --review-doc-url <url> --snapshot <snapshot> --json
+   openwiki --config /path/to/openwiki.toml candidate codeagent commit --pending <pending> --review-doc-url <url> --snapshot <snapshot> --json
+   ```
+
+10. Final report must include:
+    - Feishu review document link;
+    - number of pending records scanned;
+    - number of candidate cards created;
+    - pending path or identifier;
+    - snapshot path;
+    - state path reported by the commit command;
+    - candidate output path under `<wiki_root>/candidate/` when reported by the CLI;
+    - next step: user checks candidates in the Feishu document, then a later ingest/update workflow may admit only checked candidates.
+
+## Static Checks
+
+Run these grep checks when editing this skill documentation:
+
+```bash
+grep -R "OPENWIKI_CANDIDATE_REVIEW_DOC v1" -n skill/wiki-candidate
+grep -R "ONLY_CHECKED_CANDIDATES" -n skill/wiki-candidate
+grep -R "openwiki candidate codeagent scan" -n skill/wiki-candidate
+grep -R "Do not scan codeagent files manually" -n skill/wiki-candidate
+grep -R "Unchecked" -n skill/wiki-candidate
+grep -R "Only after both" -n skill/wiki-candidate
+grep -R "not an admission source" -n skill/wiki-candidate
+grep -R "body checkbox" -n skill/wiki-candidate
+```
+
+These checks enforce: no manual codeagent scanning; unchecked candidates are not admitted; commit happens only after review doc plus snapshot; snapshot is not an admission source; body checkbox ignored/title checkbox only.
+
+## Guardrails
+
+- Only after both the review doc and snapshot succeed may the workflow run `openwiki candidate codeagent commit`. Never run it earlier.
+- Never treat unchecked candidates as accepted. Unchecked means explicit user rejection for admission.
+- Never write formal wiki pages, entity pages, concept pages, shard indexes, or log entries from this skill.
+- Preserve ordinary external URLs and Feishu URLs exactly as provenance. For sensitive URL query values, redact only the sensitive parameter value and document the change in `risk_and_redaction`.
+- Redact secrets before creating the Feishu review document, snapshot, or candidate output.
+- Do not scan codeagent files manually; use `openwiki candidate codeagent scan --json` and its pending output.
+- Snapshot is not an admission source; only checked title lines in the Feishu review document can admit candidates.
+- Ignore body checkbox markers for admission; title checkbox only.
+
+## References
+
+- Extraction rules: `references/codeagent-extraction-rules.md`
+- Review document protocol: `references/review-doc-protocol.md`
